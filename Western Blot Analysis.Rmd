@@ -1,0 +1,1396 @@
+---
+title: "Western Blot Dimensional Reduction"
+output: html_document
+date: "2026-01-08"
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Set global chunk options at the start of your R Markdown document
+knitr::opts_chunk$set(
+  fig.width = 10,        # Default plotting width (inches)
+  fig.height = 6,        # Default plotting height
+  out.width = "100%",    # Fit figure to page width in output
+  fig.align = "center"   # Center figures
+)
+```
+
+## R Markdown
+Helpful website: https://www.codestudy.net/blog/adjusting-figure-margins-in-rmarkdown/
+
+### Load libraries
+
+```{r, message=F, warning=F}
+library(Rdimtools)
+library(ggplot2)
+library(gridExtra) # This allows ggplot graphs to be put in a grid to view all at once
+library(cowplot) # This contains the plot_grid function that allows me to organize graphs and control their widths
+library(uwot)
+library(svglite) # Needed to be able to save .svg files with ggsave
+```
+
+PCA and LDA are both linear dimensional reduction techniques.  t-SNE and UMAP are non-linear. t-SNE is good for complex, high-dimensional data but is computationally expensive and sensitive to hyperparameters like perplexity.
+
+Rdimtools: An R package for dimension reduction (DR) and intrinsic dimension estimation
+You and Shung, Software Impacts, 2022
+
+Intrinsic dimension estimation (IDE): estimates the true dimensionality of a low-dimensional structure (opposite of dimensional reduction?)
+  - Intrinsic or effective dimension of a data set = minimum number of dimensions/parameters/variables/etc. needed to account for the properties of the dataset (this number of dimensions captures all the information of the original, higher dimension dataset)
+
+Rdimtools contains 145 DR and 17 IDE algorithms
+Each algorithm is designed to reveal certain characteristics of your dataset - combine a bunch of algorithms together and you'll get a better picture (each algorithm like a single puzzle piece)
+  - Very fast and efficient
+  - 3 families of functions
+    > do. {algorithm} = DR
+    > est. {algorithm} = IDE
+    > aux. {algorithm} = auxillary
+  - Has linear, nonlinear, supervised, semi-supervised, and unsupervised DR algorithms
+  - All IDE algorithms return a global estimated dimension or "estdim"
+    > Some details:
+      * The IDE problem assumes that the data is on a smooth manifold with fixed dimensions - you can calculate a global estimate on that
+      
+UMAP may be in Rdimtools but it's kind of hard to tell
+umot is the more common package used in R for implementation of UMAP
+https://cran.r-project.org/web/packages/uwot/vignettes/uwot.html
+
+### Practice using Rdimtools on the iris dataset
+
+```{r}
+# Assign 1st 4 columns that contain measurements to a single dataframe and convert to a matrix (do.pca and I think all of the other algorithms can only run on a matrix)
+x <- as.matrix(iris[, 1:4])
+# Assign last column that contains species to a vector
+species <- iris[, 5]
+```
+
+```{r}
+# Perform pca - 2 dimensions are desired
+my.pca <- do.pca(x, ndim = 2)
+
+# Use Laplacian Score
+my.lap <- do.lscore(x, ndim = 2)
+
+# Use Diffusion Maps
+my.dfm <- do.dm(x, ndim = 2, bandwidth = 10)
+
+# Show results using basic plot() function
+# mfrow dictates how many rows and columns the figure will have and pty determines if the plot region will be square "s" or maximal "m"
+par(mfrow = c(1,3), pty = "s")
+plot(my.pca$Y, pch=19, col=species, xlab="PCA1", ylab="PCA2", main="PCA")
+plot(my.lap$Y, pch=19, col=species, xlab="LS1", ylab="LS2", main="Laplacian Score")
+plot(my.dfm$Y, pch=19, col=species, xlab="DM1", ylab="DM2", main="Diffusion Maps")
+```
+
+```{r, warning=F}
+to.plot.pca <- as.data.frame(my.pca$Y)
+g1 <- ggplot(to.plot.pca, aes(x = V1, y = V2, color = species)) + geom_point()
+to.plot.lap <- as.data.frame(my.lap$Y)
+g2 <- ggplot(to.plot.lap, aes(x = V1, y = V2, color = species)) + geom_point()
+to.plot.dfm <- as.data.frame(my.dfm$Y)
+g3 <- ggplot(to.plot.dfm, aes(x = V1, y = V2, color = species)) + geom_point()
+```
+
+```{r, warning=F}
+grid.arrange(g1, g2, g3, nrow = 3)
+```
+
+### Begin work on my western data
+
+```{r}
+# Read in western blot data that has been pivoted to a wide format and averages have been taken for technical replicates
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/")
+WB1 <- read.csv("./Thesis Studies/WB Data for PCA.csv")
+# Remove interblot control samples since those are all coordinates of 1
+WB1 <- WB1[WB1$Surface != "Interblot control", ]
+```
+
+```{r}
+# Remove Surface numbers from WB1 only
+WB1$Surface <- sub(pattern = "3% [0-9]", replacement = "3%", WB1$Surface)
+WB1$Surface <- sub(pattern = "4% [0-9]", replacement = "4%", WB1$Surface)
+WB1$Surface <- sub(pattern = "6% [0-9]", replacement = "6%", WB1$Surface)
+WB1$Surface <- sub(pattern = "7% [0-9]", replacement = "7%", WB1$Surface)
+WB1$Surface <- sub(pattern = "8% [0-9]", replacement = "8%", WB1$Surface)
+WB1$Surface <- sub(pattern = "10% [0-9]", replacement = "10%", WB1$Surface)
+WB1$Surface <- sub(pattern = "Control [0-9]", replacement = "Control", WB1$Surface)
+
+# Factor samples
+WB1$Surface <- factor(WB1$Surface, levels = c("Control", "3%", "4%", "6%", "7%", "8%", "10%"))
+WB1$Time.Point <- factor(WB1$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+```
+
+```{r}
+# Remove rows that contain NAs
+WB1 <- WB1[complete.cases(WB1), ]
+```
+
+```{r}
+# See what happens when I split the data only by CSB treatment
+CSB <- WB1[WB1$CSB.Treatment == "CSB", ]
+no.CSB <- WB1[WB1$CSB.Treatment == "No CSB", ]
+
+# Center and scale
+CSB.cscale.list <- aux.preprocess(as.matrix(CSB[, 4:9]), type = "cscale")
+CSB.cscale <- CSB.cscale.list[[1]]
+no.CSB.cscale.list <- aux.preprocess(as.matrix(no.CSB[, 4:9]), type = "cscale")
+no.CSB.cscale <- no.CSB.cscale.list[[1]]
+
+# Isolate qualtitative variables for later binding
+labels.CSB <- CSB[, 1:3]
+labels.no.CSB <- no.CSB[, 1:3]
+```
+
+#### Principal Components Analysis
+
+```{r}
+set.seed(32)
+v1 <- do.pca(CSB.cscale, ndim = 2)
+v2 <- do.pca(no.CSB.cscale, ndim = 2)
+
+plotting.v1 <- as.data.frame(v1$Y)
+plotting.v2 <- as.data.frame(v2$Y)
+
+labeled.v1 <- cbind(plotting.v1, labels.CSB)
+labeled.v2 <- cbind(plotting.v2, labels.no.CSB)
+```
+
+```{r, warning=F}
+g1 <- ggplot(labeled.v1, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) +
+  labs(title = "PCA: CSB", x = "PC1", y = "PC2") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual("Time Point", values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black", size = 16),
+        axis.text = element_text(size = 16, color = "black"),
+        axis.title = element_text(size = 16, face = "bold"),
+        plot.title = element_text(size = 18, hjust = 0.02, vjust = 0, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2))
+
+g2 <- ggplot(labeled.v2, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) +
+  labs(title = "PCA: No CSB", x = "PC1", y = "PC2") +
+  scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual("Time Point", values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 16, color = "black"),
+        axis.title = element_text(size = 16, face = "bold"),
+        plot.title = element_text(size = 18, hjust = 0.02, vjust = 0, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2))
+
+plot_grid(g2, g1, ncol = 2, align = "v")
+```
+
+### Testing Other Methods of Dimensional Reduction
+#### Laplacian score and diffiusion maps
+
+```{r}
+set.seed(98)
+# Use Laplacian Score
+lap.csb <- do.lscore(CSB.cscale, ndim = 2)
+lap.no.csb <- do.lscore(no.CSB.cscale, ndim = 2)
+plot.lpc <- as.data.frame(lap.csb$Y)
+plot.lpnc <- as.data.frame(lap.no.csb$Y)
+labeled.lpc <- cbind(plot.lpc, labels.CSB)
+labeled.lpnc <- cbind(plot.lpnc, labels.no.CSB)
+```
+
+```{r}
+# Use Diffusion Maps
+dfm.csb <- do.dm(CSB.cscale, ndim = 2, bandwidth = 40)
+dfm.no.csb <- do.dm(no.CSB.cscale, ndim = 2, bandwidth = 40)
+plot.dmc <- as.data.frame(dfm.csb$Y)
+plot.dmnc <- as.data.frame(dfm.no.csb$Y)
+labeled.dmc <- cbind(plot.dmc, labels.CSB)
+labeled.dmnc <- cbind(plot.dmnc, labels.no.CSB)
+```
+
+```{r, warning=F}
+gl1 <- ggplot(labeled.lpc, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) +
+  labs(title = "Laplacian: CSB", x = "PC1", y = "PC2") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 16, color = "black"),
+        axis.title = element_text(size = 16, face = "bold"),
+        plot.title = element_text(size = 18, hjust = 0.02, vjust = 0, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2))
+gl2 <- ggplot(labeled.lpnc, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) +
+  labs(title = "Laplacian: No CSB") +
+  scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 16, color = "black"),
+        axis.title = element_text(size = 16, face = "bold"),
+        plot.title = element_text(size = 18, hjust = 0.02, vjust = 0, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2))
+```
+
+
+```{r, warning=F}
+gd1 <- ggplot(labeled.dmc, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) +
+  labs(title = "Diffusion Maps: CSB") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 16, color = "black"),
+        axis.title = element_text(size = 16, face = "bold"),
+        plot.title = element_text(size = 18, hjust = 0.02, vjust = 0, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2))
+gd2 <- ggplot(labeled.dmnc, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) +
+  labs(title = "Diffusion Maps: No CSB") +
+  scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 16, color = "black"),
+        axis.title = element_text(size = 16, face = "bold"),
+        plot.title = element_text(size = 18, hjust = 0.02, vjust = 0, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2))
+grid.arrange(gd2, gd1, ncol = 2)
+```
+
+#### t-SNE and SNE
+
+```{r}
+set.seed(44)
+# tsne.csb <- do.tsne(CSB.cscale, ndim = 2, perplexity = 10)
+# tsne.no.csb <- do.tsne(no.CSB.cscale, ndim = 2, perplexity = 10)
+# plot.tsnec <- as.data.frame(tsne.csb$Y)
+# plot.tsnenc <- as.data.frame(tsne.no.csb$Y)
+# labeled.tsnec <- cbind(plot.tsnec, labels.CSB)
+# labeled.tsnenc <- cbind(plot.tsnenc, labels.no.CSB)
+
+sne.csb <- do.sne(CSB.cscale, ndim = 2, perplexity = 30)
+sne.no.csb <- do.sne(no.CSB.cscale, ndim = 2, perplexity = 30)
+plot.snec <- as.data.frame(sne.csb$Y)
+plot.snenc <- as.data.frame(sne.no.csb$Y)
+labeled.snec <- cbind(plot.snec, labels.CSB)
+labeled.snenc <- cbind(plot.snenc, labels.no.CSB)
+```
+
+```{r, warning=F}
+# gt1 <- ggplot(labeled.tsnec, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+#   geom_point(size = 3) + labs(title = "tSNE CSB") +
+#   scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+#   scale_shape_manual(values = c(3, 16, 17)) +
+#   theme(axis.text.x = element_text(hjust = 1),
+#         legend.position = "right",
+#         text = element_text(family = "Calibri", color = "black"),
+#         axis.text = element_text(size = 10, color = "black"),
+#         axis.title.y = element_text(size = 14, face = "bold"),
+#         axis.title.x = element_blank(),
+#         plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+#         panel.background = element_rect(fill = "white"),
+#         axis.line = element_line(color = "black"))
+# gt2 <- ggplot(labeled.tsnenc, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+#   geom_point(size = 3) + labs(title = "tSNE No CSB") +
+#   scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+#   scale_shape_manual(values = c(3, 16, 17)) +
+#   theme(axis.text.x = element_text(hjust = 1),
+#         legend.position = "right",
+#         text = element_text(family = "Calibri", color = "black"),
+#         axis.text = element_text(size = 10, color = "black"),
+#         axis.title.y = element_text(size = 14, face = "bold"),
+#         axis.title.x = element_blank(),
+#         plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+#         panel.background = element_rect(fill = "white"),
+#         axis.line = element_line(color = "black"))
+gs1 <- ggplot(labeled.snec, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) + labs(title = "SNE: CSB") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "right",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        axis.title.x = element_blank(),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+gs2 <- ggplot(labeled.snenc, aes(x = V1, y = V2, color = Surface, shape = Time.Point)) + 
+  geom_point(size = 3) + labs(title = "SNE: No CSB") +
+  scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "right",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        axis.title.x = element_blank(),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+grid.arrange(gs1, gs2, ncol = 2)
+```
+
+#### UMAP
+
+```{r}
+set.seed(67)
+csb.umap <- umap(CSB.cscale)
+labeled.csb.umap <- cbind(labels.CSB, csb.umap)
+colnames(labeled.csb.umap)[4] <- "UMAP1"
+colnames(labeled.csb.umap)[5] <- "UMAP2"
+no.csb.umap <- umap(no.CSB.cscale)
+labeled.no.csb.umap <- cbind(labels.no.CSB, no.csb.umap)
+colnames(labeled.no.csb.umap)[4] <- "UMAP1"
+colnames(labeled.no.csb.umap)[5] <- "UMAP2"
+```
+
+```{r}
+u1 <- ggplot(labeled.csb.umap, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB, min_dist = 0.01") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "right",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+u2 <- ggplot(labeled.no.csb.umap, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: No CSB") +
+  scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+grid.arrange(u1, u2, ncol = 2)
+```
+
+```{r}
+# Testing different minimum distance between embedded points
+# Smaller distances result in tighter cluster where nearby points on the manifold are drawn closer together
+# Works together with spread (default = 1) to show how clustered/clumped points are
+set.seed(21)
+labeled.csb.umap0.3 <- cbind(labels.CSB, umap(CSB.cscale, min_dist = 0.03))
+colnames(labeled.csb.umap0.3)[4] <- "UMAP1"
+colnames(labeled.csb.umap0.3)[5] <- "UMAP2"
+```
+
+```{r}
+plot1 <- ggplot(labeled.csb.umap, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB, min_dist = 0.01") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "right",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+plot2 <- ggplot(labeled.csb.umap0.3, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB min_dist = 0.03") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+grid.arrange(plot1, plot2, ncol = 2)
+```
+
+```{r}
+# Comparing different neighest neighbors numbers
+set.seed(432)
+labeled.csb.umap20 <- cbind(labels.CSB, umap(CSB.cscale, min_dist = 0.01, n_neighbors = 20))
+colnames(labeled.csb.umap20)[4] <- "UMAP1"
+colnames(labeled.csb.umap20)[5] <- "UMAP2"
+```
+
+```{r}
+set.seed(93)
+labeled.csb.umap40 <- cbind(labels.CSB, umap(CSB.cscale, min_dist = 0.01, n_neighbors = 40))
+colnames(labeled.csb.umap40)[4] <- "UMAP1"
+colnames(labeled.csb.umap40)[5] <- "UMAP2"
+```
+
+```{r}
+set.seed(88)
+labeled.csb.umap5 <- cbind(labels.CSB, umap(CSB.cscale, min_dist = 0.01, n_neighbors = 5))
+colnames(labeled.csb.umap5)[4] <- "UMAP1"
+colnames(labeled.csb.umap5)[5] <- "UMAP2"
+```
+
+```{r}
+# All of these models have min_dist = 0.01 and all other defaults
+nn15 <- ggplot(labeled.csb.umap, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB nn = 15") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+nn5 <- ggplot(labeled.csb.umap5, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB nn = 5") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+nn20 <- ggplot(labeled.csb.umap20, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB nn = 20") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+nn40 <- ggplot(labeled.csb.umap40, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) +
+  geom_point(size = 3) + labs(title = "UMAP: CSB nn = 40") +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual(values = c(3, 16, 17)) +
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "Calibri", color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, hjust = 0.02, vjust = -1, face = "bold"),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"))
+grid.arrange(nn5, nn15, nn20, nn40, nrow = 2, ncol = 2)
+```
+
+### Isomap -- THIS IS THE METHOD I AM SELECTING!!!!!!
+
+```{r}
+library(vegan)
+# You must specify k (number of nearest neighbors).
+# For this dataset with 6 protein features and moderate sample size, typical values are k = 5–15.
+iso.csb <- isomap(dist(CSB.cscale, method = "euclidean"), k = 10)
+iso.nocsb <- isomap(dist(no.CSB.cscale, method = "euclidean"), k = 10)
+iso.csb.mat <- as.data.frame(iso.csb$points)
+iso.nocsb.mat <- as.data.frame(iso.nocsb$points)
+labeled.iso.csb <- cbind(iso.csb.mat, labels.CSB)
+labeled.iso.nocsb <- cbind(iso.nocsb.mat, labels.no.CSB)
+```
+
+```{r}
+fig.theme <- theme(axis.text.x = element_text(hjust = 1),
+                  legend.position = "right",
+                  text = element_text(color = "black"),
+                  axis.text = element_text(size = 10, color = "black"),
+                  axis.title = element_text(size = 10, face = "bold"),
+                  plot.title = element_text(size = 12, hjust = 0.02, vjust = -1),
+                  panel.background = element_rect(fill = "white"),
+                  axis.line = element_line(color = "black"))
+```
+
+```{r}
+giso1 <- ggplot(labeled.iso.csb, aes(Dim1, Dim2, color = Surface, shape = Time.Point)) +
+  geom_point() +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual("Time Point", values = c(3, 16, 17)) +
+  labs(title = "Mechanical Fraction") +
+  fig.theme
+giso2 <- ggplot(labeled.iso.nocsb, aes(Dim1, Dim2, color = Surface, shape = Time.Point)) +
+  geom_point() +
+  scale_color_manual(values = c("#1C86EE", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual("Time Point", values = c(3, 16, 17)) +
+  labs(title = "Whole Cell Lysate") +
+  fig.theme
+```
+
+```{r}
+isomap.plots <- grid.arrange(giso1, giso2, nrow = 2)
+```
+
+```{r}
+ggsave("./Figures/DimReduction_Isomap.svg", plot = isomap.plots, width = 4, height = 5, units = "in")
+```
+
+```{r}
+a <- as.data.frame(cbind(iso.nocsb.mat$Dim1, no.CSB.cscale[, 1], labels.no.CSB))
+b <- as.data.frame(cbind(iso.nocsb.mat$Dim1, no.CSB.cscale[, 2], labels.no.CSB))
+c <- as.data.frame(cbind(iso.nocsb.mat$Dim1, no.CSB.cscale[, 3], labels.no.CSB))
+d <- as.data.frame(cbind(iso.nocsb.mat$Dim1, no.CSB.cscale[, 4], labels.no.CSB))
+e <- as.data.frame(cbind(iso.nocsb.mat$Dim1, no.CSB.cscale[, 5], labels.no.CSB))
+f <- as.data.frame(cbind(iso.nocsb.mat$Dim1, no.CSB.cscale[, 6], labels.no.CSB))
+g <- as.data.frame(cbind(iso.nocsb.mat$Dim2, no.CSB.cscale[, 1], labels.no.CSB))
+h <- as.data.frame(cbind(iso.nocsb.mat$Dim2, no.CSB.cscale[, 2], labels.no.CSB))
+i <- as.data.frame(cbind(iso.nocsb.mat$Dim2, no.CSB.cscale[, 3], labels.no.CSB))
+j <- as.data.frame(cbind(iso.nocsb.mat$Dim2, no.CSB.cscale[, 4], labels.no.CSB))
+k <- as.data.frame(cbind(iso.nocsb.mat$Dim2, no.CSB.cscale[, 5], labels.no.CSB))
+l <- as.data.frame(cbind(iso.nocsb.mat$Dim2, no.CSB.cscale[, 6], labels.no.CSB))
+```
+
+```{r}
+library(ggpmisc)
+ggplot(a, aes(`iso.nocsb.mat$Dim1`, `no.CSB.cscale[, 1]`, color = Surface)) + geom_point() + stat_poly_eq()
+ggplot(b, aes(`iso.nocsb.mat$Dim1`, `no.CSB.cscale[, 2]`, color = Surface)) + geom_point() + stat_poly_eq()
+ggplot(c, aes(`iso.nocsb.mat$Dim1`, `no.CSB.cscale[, 3]`, color = Surface)) + geom_point() + stat_poly_eq()
+ggplot(d, aes(`iso.nocsb.mat$Dim1`, `no.CSB.cscale[, 4]`, color = Surface)) + geom_point() + stat_poly_eq()
+ggplot(e, aes(`iso.nocsb.mat$Dim1`, `no.CSB.cscale[, 5]`, color = Surface)) + geom_point() + stat_poly_eq()
+ggplot(f, aes(`iso.nocsb.mat$Dim1`, `no.CSB.cscale[, 6]`, color = Surface)) + geom_point() + stat_poly_eq()
+```
+
+```{r}
+cor.test(a$`iso.nocsb.mat$Dim1`, a$`no.CSB.cscale[, 1]`, method = "pearson")
+cor.test(b$`iso.nocsb.mat$Dim1`, b$`no.CSB.cscale[, 2]`, method = "pearson")
+cor.test(c$`iso.nocsb.mat$Dim1`, c$`no.CSB.cscale[, 3]`, method = "pearson")
+cor.test(d$`iso.nocsb.mat$Dim1`, d$`no.CSB.cscale[, 4]`, method = "pearson")
+cor.test(e$`iso.nocsb.mat$Dim1`, e$`no.CSB.cscale[, 5]`, method = "pearson")
+cor.test(f$`iso.nocsb.mat$Dim1`, f$`no.CSB.cscale[, 6]`, method = "pearson")
+```
+
+
+```{r}
+ggplot(g, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(h, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(i, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(j, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(k, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(l, aes(V1, V2)) + geom_point() + stat_poly_eq()
+```
+
+```{r}
+cor.test(g$`iso.nocsb.mat$Dim2`, g$`no.CSB.cscale[, 1]`, method = "pearson")
+cor.test(h$`iso.nocsb.mat$Dim2`, h$`no.CSB.cscale[, 2]`, method = "pearson")
+cor.test(i$`iso.nocsb.mat$Dim2`, i$`no.CSB.cscale[, 3]`, method = "pearson")
+cor.test(j$`iso.nocsb.mat$Dim2`, j$`no.CSB.cscale[, 4]`, method = "pearson")
+cor.test(k$`iso.nocsb.mat$Dim2`, k$`no.CSB.cscale[, 5]`, method = "pearson")
+cor.test(l$`iso.nocsb.mat$Dim2`, l$`no.CSB.cscale[, 6]`, method = "pearson")
+```
+
+
+```{r}
+m <- as.data.frame(cbind(iso.csb.mat$Dim1, CSB.cscale[, 1], labels.CSB))
+n <- as.data.frame(cbind(iso.csb.mat$Dim1, CSB.cscale[, 2], labels.CSB))
+o <- as.data.frame(cbind(iso.csb.mat$Dim1, CSB.cscale[, 3], labels.CSB))
+p <- as.data.frame(cbind(iso.csb.mat$Dim1, CSB.cscale[, 4], labels.CSB))
+q <- as.data.frame(cbind(iso.csb.mat$Dim1, CSB.cscale[, 5], labels.CSB))
+r <- as.data.frame(cbind(iso.csb.mat$Dim1, CSB.cscale[, 6], labels.CSB))
+s <- as.data.frame(cbind(iso.csb.mat$Dim2, CSB.cscale[, 1], labels.CSB))
+t <- as.data.frame(cbind(iso.csb.mat$Dim2, CSB.cscale[, 2], labels.CSB))
+u <- as.data.frame(cbind(iso.csb.mat$Dim2, CSB.cscale[, 3], labels.CSB))
+v <- as.data.frame(cbind(iso.csb.mat$Dim2, CSB.cscale[, 4], labels.CSB))
+w <- as.data.frame(cbind(iso.csb.mat$Dim2, CSB.cscale[, 5], labels.CSB))
+x <- as.data.frame(cbind(iso.csb.mat$Dim2, CSB.cscale[, 6], labels.CSB))
+```
+
+```{r}
+library(ggpmisc)
+ggplot(m, aes(`iso.csb.mat$Dim1`, `CSB.cscale[, 1]`)) + geom_point() + stat_poly_eq()
+ggplot(n, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(o, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(p, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(q, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(r, aes(V1, V2)) + geom_point() + stat_poly_eq()
+```
+
+```{r}
+cor.test(m$`iso.csb.mat$Dim1`, m$`CSB.cscale[, 1]`, method = "pearson")
+cor.test(n$`iso.csb.mat$Dim1`, n$`CSB.cscale[, 2]`, method = "pearson")
+cor.test(o$`iso.csb.mat$Dim1`, o$`CSB.cscale[, 3]`, method = "pearson")
+cor.test(p$`iso.csb.mat$Dim1`, p$`CSB.cscale[, 4]`, method = "pearson")
+cor.test(q$`iso.csb.mat$Dim1`, q$`CSB.cscale[, 5]`, method = "pearson")
+cor.test(r$`iso.csb.mat$Dim1`, r$`CSB.cscale[, 6]`, method = "pearson")
+```
+
+```{r}
+ggplot(s, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(t, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(u, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(v, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(w, aes(V1, V2)) + geom_point() + stat_poly_eq()
+ggplot(x, aes(V1, V2)) + geom_point() + stat_poly_eq()
+```
+
+```{r}
+cor.test(s$`iso.csb.mat$Dim2`, s$`CSB.cscale[, 1]`, method = "pearson")
+cor.test(t$`iso.csb.mat$Dim2`, t$`CSB.cscale[, 2]`, method = "pearson")
+cor.test(u$`iso.csb.mat$Dim2`, u$`CSB.cscale[, 3]`, method = "pearson")
+cor.test(v$`iso.csb.mat$Dim2`, v$`CSB.cscale[, 4]`, method = "pearson")
+cor.test(w$`iso.csb.mat$Dim2`, w$`CSB.cscale[, 5]`, method = "pearson")
+cor.test(x$`iso.csb.mat$Dim2`, x$`CSB.cscale[, 6]`, method = "pearson")
+```
+
+
+### Choosing a method
+
+***Notes***
+
+Reference: A review, framework, and R toolkit for exploring, evaluating, and comparing visualization methods
+- Gives a review and synthesis of methods for evaluation DR techniques
+- Rank-order neighborhood evaluation metrics: what is that???????
+- QVisVis is a GitHub repository that consists of many .R files that each contain a unique function or multiple functions
+  -- I have copied the two functions that I selected into this .rmd so that I don't have to worry about losing the original .R files from GitHub
+- Rationale behind SNE: given two items j and i, the similarity between the two items is proportionate to the conditional probability prob(j|i)
+  -- in t-SNE, the conditional probabilities in the lower dimensional space are considered to have a t-distribution which has fatter tails than a z or Gaussian distribution
+  -- t-SNE optimization function minimizes the sum of Kullback-Liebler divergences between probability distributions for lower- and higher-dimensional solutions (essentially trying to match prob(j|i) in lower dim. to what the prob is in high dim.)
+      --- lower perplexity improves local fitting
+      --- higher perplexity improves global fitting
+      
+Visualization exploration: process where a user tunes parameters to transform and explore data
+To evaluate visualizations - value-based evaluation framework
+- Visualization value is function of how user can find insights in min. time, discover insights, uncover essence of data, and generate confidence in data and data domain
+
+Functions `GenAgree` and `PLiftComparegg` code is from https://github.com/MDSOPT/QVisVis 
+
+```{r}
+GenAgree <- function(Config1, Config2, Startk, Endk, DMetric = "euclidian", varargin = NULL, Description = NULL){
+  # GenAgree
+  # Calculates a generalized agreement metric as per France and Carroll (2007)
+  # Config 1 - Configuration 1 to compare - this must be a numerical matrix or data frame with each row corresponding to an observation and each column corresponding to a single dimension (for example, this could be x from prcomp that contains the principal components of a pca run)
+  # Config 2 - Configuration 2 to compare - this must have the same number of rows as Config 1 but can be a dimension reduction matrix or data frame from any other kind of dimensional reduction technique, from the same technique but with different parameters (i.e. different perplexity like for SNE or different bandwidth like for diffusion maps)
+
+###### Note: Config 1 or Config 2 can also be the original higher dimensional data - it just must the in the same quantitative only format you would feed into PCA, UMAP, or t-SNE, etc.
+  
+  # Startk - The starting value of k
+  # Endk - The end value of k (this cannot be greater than the number of rows of Config 1 or Config 2)
+  # DMetric - The distance metric used to calculate distances
+  # DMetricParam - An optional parameter for the distance metric
+  # The name of the distance metric for pdist function
+  # OutValue - The value of the generalized agreement
+  # RBuild - k*4 table giving following values for each k
+  # 1 - The value of AR(k) [AR(k) means agreement of k]
+  # 2 - ER(k) drawn from hypergeometric
+  # 3 - Numerator of agreement
+  # 4 - Denominator of agreement
+  # Calculates a generalized agreement metric as per France and Carroll (2007)
+  # Written Stephen France 2011: france@uwm.edu
+  # Please cite:
+  # France, S.L., Carroll, J.D. (2007).  Development of an Agreement Metric 
+  # based upon the RAND Index for the Evaluation of Dimensionality Reduction 
+  # Techniques, with Applications to Mapping Customer Data. Machine Learning 
+  # and Data Mining in Pattern Recognition, Petra Perner (Ed.), LNAI, 
+  # Vol. 4571, Proceedings Conference MLDM 2007, Leipzig/Germany, Springer: Heidelberg
+  
+  
+  n <- nrow(Config1)    # Determines size for the configuration
+  
+  # Calculate nearest neighbors for each configuration
+  D <- as.matrix(dist(Config1, method = DMetric, diag = TRUE, upper = TRUE, p = varargin))
+  Temp <- apply(D, 1, sort, index.return = TRUE)
+  IDX1 <- t(matrix(unlist(Temp), n*2, n))
+  IDX1 <- IDX1[, (n+2):(2*n)]
+  
+  D <- as.matrix(dist(Config2, method = DMetric, diag = TRUE, upper = TRUE,p = varargin))
+  Temp <- apply(D, 1, sort, index.return = TRUE)
+  IDX2 <- t(matrix(unlist(Temp), n*2, n))
+  IDX2 <- IDX2[, (n+2):(2*n)]
+  rm(D,Temp)
+  
+  Nok <- Endk-Startk+1 # Nok = number of k
+  RBuild <- as.data.frame(matrix(0, Nok, 4))
+  RowTotalAgree <- matrix(0,n,Nok+1)
+  RowAgree <- matrix(0,n,Nok+1)
+  TotalAgree <- 0
+  
+  # Update total agreement if not starting at 1
+  if (Startk > 1){
+    for (nCounter in 1:n){
+      Temp<-intersect(IDX1[nCounter,1:(Startk-1)],IDX2[nCounter,1:(Startk-1)])
+      RowTotalAgree[nCounter,1]<-length(Temp)
+      RowAgree[nCounter,1]<-RowTotalAgree[nCounter,1]/(Startk-1)
+      TotalAgree<-TotalAgree+RowAgree[nCounter,1]
+      }
+    rm(Temp)
+    }
+  
+  for (kCounter in Startk:Endk)
+  {
+    for (nCounter in 1:n)
+    {
+      # Check for agreement with added item
+      Increment<-0
+      Increment<-Increment+as.numeric(IDX1[nCounter,kCounter]==IDX2[nCounter,kCounter])
+      Increment<-Increment+(length(which(IDX1[nCounter,0:(kCounter-1)]==IDX2[nCounter,kCounter]))>0)
+      Increment<-Increment+(length(which(IDX2[nCounter,0:(kCounter-1)]==IDX1[nCounter,kCounter]))>0)
+      TotalAgree<-TotalAgree+Increment
+      RowTotalAgree[nCounter,kCounter-Startk+2]<-RowTotalAgree[nCounter,kCounter-Startk+1]+Increment
+      RowAgree[nCounter,kCounter-Startk+2]<-RowTotalAgree[nCounter,kCounter-Startk+2]/kCounter
+    }
+    RBuild[kCounter-Startk+1,1]<-TotalAgree/(n*kCounter)
+    RBuild[kCounter-Startk+1,2]<-(kCounter)/(n-1)
+  }     
+      
+  # Numerator of aggregate agreement rate
+  RBuild[,3]=RBuild[,1]-RBuild[,2]
+  # Denominator of aggregate agreement rate 
+  RBuild[,4]=1-RBuild[,2]
+  RBuild<-cbind(Startk:Endk,RBuild)   
+  names(RBuild)<-c('k','Agr','ER(Agr)','AdjNum','AdjDenom')
+  
+  # Get the final Agreement rate
+  OutStruct<-NULL
+  OutStruct$n<-n
+  OutStruct$Description<-Description
+  OutStruct$Startk<-Startk
+  OutStruct$Endk<-Endk
+  OutStruct$Nok<-Nok
+  # Looking for the item names for the items.  
+  if (is.null(rownames(Config1))==FALSE) 
+  {
+    OutStruct$ItemNames<-rownames(Config1)
+  } 
+  else
+  {
+    if (is.null(rownames(Config2))==FALSE)
+    {
+      OutStruct$ItemNames<-rownames(Config2)
+    }
+  }
+  OutStruct$RBuild <-RBuild
+  OutStruct$RowTotalAgree<-RowTotalAgree
+  OutStruct$RowAgree<-RowAgree
+  OutStruct$TotalAgree<-TotalAgree
+  OutStruct$Agree<-sum(RBuild[,2])/Nok
+  OutStruct$AdjAgree <- sum(RBuild[,4])/sum(RBuild[,5])
+  
+  return(OutStruct)
+}
+```
+
+```{r}
+PLiftComparegg <- function(AgreeStruct1, AgreeStruct2, IsFill = TRUE, ShowMode = "show", TextSize = 10){
+  # ScatterComparegg
+  # Creates a lift diagram which shows the agreement of two techniques over k 
+  # (the k defined by the agreement structures) in comparison to expected agreement
+  # AgreeStruct1 - An agreement structure created with GenAgree or GenAgreeDist
+  # AgreeStruct2 - A destination structure created with GenAgree or GenAgreeDist
+  # IsFill - TRUE if the areas between the agreement curves and the expected agreement are colored (with transparent colors for overlapping areas)
+  #         FALSE otherwise
+  # ShowMode - "show" if you wish to show plot in graphics environment
+  #          - "return" if you wish to return the plot 
+  # TextSize - The text size in standard ggplot units
+  # Written Stephen France 2016-2019: sfrance@business.msstat.edu
+  # Please cite:
+  # France, S.L., Carroll, J.D. (2007).  Development of an Agreement Metric 
+  # based upon the RAND Index for the Evaluation of Dimensionality Reduction 
+  # Techniques, with Applications to Mapping Customer Data. Machine Learning 
+  # and Data Mining in Pattern Recognition, Petra Perner (Ed.), LNAI, 
+  # Vol. 4571, Proceedings Conference MLDM 2007, Leipzig/Germany, Springer: Heidelberg  
+  
+  require(ggplot2)
+  require(reshape2)
+  
+  if (is.null(AgreeStruct1$Description)) Desc1 <- "Config1" else Desc1 <- AgreeStruct1$Description 
+  if (is.null(AgreeStruct2$Description)) Desc2 <- "Config2" else Desc2 <- AgreeStruct2$Description
+    
+  #Build a data frame, with agreement for both configurations and expected agreement
+  PlotVal <- cbind(AgreeStruct1$RBuild[1:3], AgreeStruct2$RBuild[2])  
+  names(PlotVal)[2] <- "Agr1"
+  names(PlotVal)[4] <- "Agr2"
+  PlotTitle <- paste("Agr1(",Desc1,"):",round(AgreeStruct1$Agree,4)," Agr2(",Desc2,"):",round(AgreeStruct2$Agree,4), sep="")
+  PlotVal <- cbind(PlotVal, min_line = pmin(PlotVal[,2],PlotVal[,3],PlotVal[,4])) 
+  PlotVal <- melt(PlotVal, id.vars=c("k","min_line"), variable.name="Config", value.name="Agree")
+  
+# scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665"))
+  
+  if (IsFill==TRUE){
+    #Create filled plot
+    sp <- ggplot(data = PlotVal, aes(x = k, fill = Config, color = Config, linetype = Config))
+    sp <- sp + geom_ribbon(alpha = 0.2, aes(ymax = Agree, ymin = min_line))
+    sp <- sp + geom_line(aes(y = Agree), size = 1)
+    sp <- sp + scale_fill_manual(values=c(Agr1 = "#E6B91E", Agr2 = "#E76618", `ER(Agr)` = "black"))
+    sp <- sp + scale_color_manual(values=c(Agr1 = "#E6B91E", Agr2 = "#E76618", `ER(Agr)` = "black"))
+    sp <- sp + scale_linetype_manual(values=c(Agr1="solid",Agr2="solid", `ER(Agr)`="twodash"))
+  }
+  else
+  {
+    #Create a standard line plot
+    sp <- ggplot(data=PlotVal, aes(x=k,color=Config,linetype=Config))
+    sp <- sp + geom_line(aes(y = Agree),size=1)
+    sp <- sp + scale_color_manual(values=c(Agr1="#1C86EE",Agr2="green", `ER(Agr)`="#C42F1A"))
+    sp <- sp + scale_linetype_manual(values=c(Agr1="solid",Agr2="solid", `ER(Agr)`="twodash"))
+  }
+  
+  fig.theme <- theme(axis.line = element_line(color = "black"),
+        panel.background = element_rect(fill = "white"),
+        panel.grid = element_line(color = "gray96"))
+  
+  sp <- sp + ggtitle(PlotTitle)
+  sp <- sp + fig.theme
+  sp <- sp + theme(legend.title = element_text(face = "bold"))
+  sp <- sp + theme(text = element_text(size = TextSize, color = "black"), plot.title = element_text(hjust = 0.5, size = rel(1)))
+  
+  if (ShowMode=="show"){
+    plot(sp)
+  }
+  else
+  {
+    return(sp)
+  }
+}
+```
+
+```{r}
+ggplot(df_iso, aes(Dim1, Dim2, color = Surface, shape = Time.Point)) +
+  geom_point() +
+  scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665")) +
+  scale_shape_manual("Time Point", values = c(3, 16, 17))
+```
+
+```{r}
+pca.c <- do.pca(CSB.cscale, ndim = 2)
+pca.c.mat <- pca.c$Y
+pca.nc <- do.pca(no.CSB.cscale, ndim = 2)
+pca.nc.mat <- pca.nc$Y
+
+iso.c <- isomap(dist(CSB.cscale, method = "euclidean"), k = 10)
+iso.c.mat <- as.data.frame(iso.c$points)
+iso.nc <- isomap(dist(no.CSB.cscale, method = "euclidean"), k = 10)
+iso.nc.mat <- as.data.frame(iso.nc$points)
+
+lap.c <- do.lscore(CSB.cscale, ndim = 2)
+lap.c.mat <- lap.c$Y
+lap.nc <- do.lscore(no.CSB.cscale, ndim = 2)
+lap.nc.mat <- lap.nc$Y
+
+dfm.c <- do.dm(CSB.cscale, ndim = 2, bandwidth = 10)
+dfm.c.mat <- dfm.c$Y
+dfm.nc <- do.dm(no.CSB.cscale, ndim = 2, bandwidth = 10)
+dfm.nc.mat <- dfm.nc$Y
+
+tsne.c <- do.tsne(CSB.cscale, ndim = 2, perplexity = 10)
+tsne.c.mat <- tsne.c$Y
+tsne.nc <- do.tsne(no.CSB.cscale, ndim = 2, perplexity = 10)
+tsne.nc.mat <- tsne.nc$Y
+
+sne.c <- do.sne(CSB.cscale, ndim = 2, perplexity = 10)
+sne.c.mat <- sne.c$Y
+sne.nc <- do.sne(no.CSB.cscale, ndim = 2, perplexity = 10)
+sne.nc.mat <- sne.nc$Y
+
+umap.c.mat <- umap(CSB.cscale)
+umap.nc.mat <- umap(no.CSB.cscale)
+```
+
+```{r}
+agree_pca_c <- GenAgree(pca.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "PCA")
+agree_iso_c <- GenAgree(iso.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "Iso")
+agree_lap_c <- GenAgree(lap.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "Lap")
+agree_dfm_c <- GenAgree(dfm.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "DFM")
+agree_tsne_c <- GenAgree(tsne.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "t-SNE")
+agree_sne_c <- GenAgree(sne.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "SNE")
+agree_umap_c <- GenAgree(umap.c.mat, CSB.cscale, Startk = 1, Endk = 56, Description = "UMAP")
+```
+
+```{r}
+gpc <- PLiftComparegg(AgreeStruct1 = agree_pca_c, AgreeStruct2 = agree_umap_c, IsFill = T, TextSize = 8)
+gic <- PLiftComparegg(AgreeStruct1 = agree_iso_c, AgreeStruct2 = agree_umap_c, IsFill = T, TextSize = 8)
+glc <- PLiftComparegg(AgreeStruct1 = agree_lap_c, AgreeStruct2 = agree_umap_c, IsFill = T, TextSize = 8)
+gdc <- PLiftComparegg(AgreeStruct1 = agree_dfm_c, AgreeStruct2 = agree_umap_c, IsFill = T, TextSize = 8)
+gtc <- PLiftComparegg(AgreeStruct1 = agree_tsne_c, AgreeStruct2 = agree_umap_c, IsFill = T, TextSize = 8)
+gsc <- PLiftComparegg(AgreeStruct1 = agree_sne_c, AgreeStruct2 = agree_umap_c, IsFill = T, TextSize = 8)
+```
+
+```{r}
+csb.grid <- grid.arrange(gpc, gic, glc, gdc, gtc, gsc, ncol = 2, nrow = 3)
+```
+
+```{r}
+ggsave("./R Files/Figures/DimReduction_Comparison_CSB.svg", plot = csb.grid, width = 6, height = 6, units = "in")
+```
+
+```{r}
+agree_pca_nc <- GenAgree(pca.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "PCA")
+agree_iso_nc <- GenAgree(iso.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "Iso")
+agree_lap_nc <- GenAgree(lap.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "Lap")
+agree_dfm_nc <- GenAgree(dfm.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "DFM")
+agree_tsne_nc <- GenAgree(tsne.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "t-SNE")
+agree_sne_nc <- GenAgree(sne.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "SNE")
+agree_umap_nc <- GenAgree(umap.nc.mat, no.CSB.cscale, Startk = 1, Endk = 42, Description = "UMAP")
+```
+
+```{r}
+gpnc <- PLiftComparegg(AgreeStruct1 = agree_pca_nc, AgreeStruct2 = agree_umap_nc, IsFill = T, TextSize = 8)
+ginc <- PLiftComparegg(AgreeStruct1 = agree_iso_nc, AgreeStruct2 = agree_umap_nc, IsFill = T, TextSize = 8)
+glnc <- PLiftComparegg(AgreeStruct1 = agree_lap_nc, AgreeStruct2 = agree_umap_nc, IsFill = T, TextSize = 8)
+gdnc <- PLiftComparegg(AgreeStruct1 = agree_dfm_nc, AgreeStruct2 = agree_umap_nc, IsFill = T, TextSize = 8)
+gtnc <- PLiftComparegg(AgreeStruct1 = agree_tsne_nc, AgreeStruct2 = agree_umap_nc, IsFill = T, TextSize = 8)
+gsnc <- PLiftComparegg(AgreeStruct1 = agree_sne_nc, AgreeStruct2 = agree_umap_nc, IsFill = T, TextSize = 8)
+```
+
+```{r}
+no.csb.grid <- grid.arrange(gpnc, ginc, glnc, gdnc, gtnc, gsnc, ncol = 2, nrow = 3)
+```
+
+```{r}
+ggsave("./R Files/Figures/DimReduction_Comparison_NoCSB.svg", plot = no.csb.grid, width = 6, height = 6, units = "in")
+```
+
+## Regular graphing
+
+```{r}
+setwd("C:/Users/Elizabeth/OneDrive - The Pennsylvania State University/Data/")
+WB3 <- read.csv("./Thesis Studies/Western Blot Data as of 12-8-25.csv")
+```
+
+```{r}
+WB3$Sample <- gsub(pattern = "3% [0-9]", replacement = "3%", WB3$Sample)
+WB3$Sample <- gsub(pattern = "4% [0-9]", replacement = "4%", WB3$Sample)
+WB3$Sample <- gsub(pattern = "6% [0-9]", replacement = "6%", WB3$Sample)
+WB3$Sample <- gsub(pattern = "7% [0-9]", replacement = "7%", WB3$Sample)
+WB3$Sample <- gsub(pattern = "8% [0-9]", replacement = "8%", WB3$Sample)
+WB3$Sample <- gsub(pattern = "10% [0-9]", replacement = "10%", WB3$Sample)
+WB3$Sample <- gsub(pattern = "Control [0-9]", replacement = "Control", WB3$Sample)
+
+WB3$Target <- gsub(pattern = "b-Actin", replacement = "\U03B2-Actin", x = WB3$Target)
+WB3$Target <- gsub(pattern = "a-Actinin", replacement = "\U03B1-Actinin", x = WB3$Target)
+WB3$Target <- gsub(pattern = "a-Tubulin", replacement = "\U03B1-Tubulin", x = WB3$Target)
+WB3$Target <- gsub(pattern = "Cadherin", replacement = "Pan-Cadherin", x = WB3$Target)
+
+# Factor targets
+WB3$Target <- factor(WB3$Target, levels = c("\U03B1-Actinin", "\U03B1-Tubulin", "\U03B2-Actin", "Ezrin", "Pan-Cadherin", "Vinculin"))
+
+# Factor samples
+WB3$Sample <- factor(WB3$Sample, levels = c("Control", "10%", "8%", "7%", "6%", "4%", "3%"))
+
+# Log base 2 transform IBCR column
+WB3$Log2IBCR <- log2(WB3$IBCR)
+
+# Make separate dataframes
+gcsb24 <- WB3[WB3$CSB.Treatment == "CSB" & WB3$Time.Point == "24 Hours", ]
+gcsb7 <- WB3[WB3$CSB.Treatment == "CSB" & WB3$Time.Point == "7 Days", ]
+gcsb14 <- WB3[WB3$CSB.Treatment == "CSB" & WB3$Time.Point == "14 Days", ]
+gno.csb24 <- WB3[WB3$CSB.Treatment == "No CSB" & WB3$Time.Point == "24 Hours", ]
+gno.csb7 <- WB3[WB3$CSB.Treatment == "No CSB" & WB3$Time.Point == "7 Days", ]
+gno.csb14 <- WB3[WB3$CSB.Treatment == "No CSB" & WB3$Time.Point == "14 Days", ]
+```
+
+```{r}
+fig.colors <- c("#918665", "#90C226", "#54A021", "#E6B91E", "#E76618", "#C42F1A")
+fig.theme <- theme(text = element_text(color = "black"), axis.title.x = element_blank(),
+                  axis.title.y = element_text(size = 12),
+                  axis.text = element_text(size = 10),
+                  legend.title = element_text(size = 12, face = "bold"),
+                  legend.text = element_text(size = 8),
+                  title = element_text(size = 12),
+                  strip.text.x = element_text(size = 10, colour = "black", angle = 0),
+                  panel.background = element_rect(fill = "white"),
+                  axis.line = element_line(color = "black"))
+```
+
+```{r, warning=F}
+g1 <- ggplot(gcsb24, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Mechanical Fraction: 24 Hours") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors)
+
+g2 <- ggplot(gcsb7, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Mechanical Fraction: 7 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors)
+
+g3 <- ggplot(gcsb14, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Mechanical Fraction: 14 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors)
+
+g4 <- ggplot(gno.csb24, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Whole Cell Lysate: 24 Hours") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors)
+
+g5 <- ggplot(gno.csb7, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Whole Cell Lysate: 7 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors)
+
+g6 <- ggplot(gno.csb14, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Whole Cell Lysate: 14 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors)
+```
+
+```{r warning=F}
+mf <- grid.arrange(g1, g2, g3, nrow = 3)
+wc <- grid.arrange(g4, g5, g6, nrow = 3)
+```
+
+```{r}
+library(svglite)
+ggsave("./Figures/Whole_Cell_Lysate_boxplots.pdf", plot = wc, width = 6, height = 5, units = "in")
+```
+
+### Outlier removal to be able to apply Dunn's test
+
+```{r}
+# Outlier removal: CSB 24 Hours
+list_quantiles <- tapply(gcsb24$Log2IBCR, gcsb24$Sample, quantile, na.rm = T)
+ 
+Q1s <- sapply(1:7, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:7, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(gcsb24$Log2IBCR, gcsb24$Sample, IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(gcsb24, gcsb24$Sample)
+ 
+no.outliers.csb24 <- NULL
+for (i in 1:7){
+out <- subset(datas[[i]], datas[[i]]$Log2IBCR > Lowers[i] & datas[[i]]$Log2IBCR < Uppers[i])
+no.outliers.csb24 <- rbind(no.outliers.csb24, out)
+}
+```
+
+```{r}
+# Outlier removal: CSB 7 Days
+list_quantiles <- tapply(gcsb7$Log2IBCR, gcsb7$Sample, quantile, na.rm = T)
+ 
+Q1s <- sapply(1:7, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:7, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(gcsb7$Log2IBCR, gcsb7$Sample, IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(gcsb7, gcsb7$Sample)
+ 
+no.outliers.csb7 <- NULL
+for (i in 1:7){
+out <- subset(datas[[i]], datas[[i]]$Log2IBCR > Lowers[i] & datas[[i]]$Log2IBCR < Uppers[i])
+no.outliers.csb7 <- rbind(no.outliers.csb7, out)
+}
+```
+
+```{r}
+# Outlier removal: CSB 14 Days
+# Factor samples
+gcsb14$Sample <- factor(gcsb14$Sample, levels = c("Control", "10%", "8%", "7%", "6%", "3%"))
+list_quantiles <- tapply(gcsb14$Log2IBCR, gcsb14$Sample, quantile, na.rm = T)
+ 
+Q1s <- sapply(1:6, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:6, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(gcsb14$Log2IBCR, gcsb14$Sample, IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(gcsb14, gcsb14$Sample)
+ 
+no.outliers.csb14 <- NULL
+for (i in 1:6){
+out <- subset(datas[[i]], datas[[i]]$Log2IBCR > Lowers[i] & datas[[i]]$Log2IBCR < Uppers[i])
+no.outliers.csb14 <- rbind(no.outliers.csb14, out)
+}
+```
+
+```{r}
+# Outlier removal: WCL 24 Hours
+list_quantiles <- tapply(gno.csb24$Log2IBCR, gno.csb24$Sample, quantile, na.rm = T)
+ 
+Q1s <- sapply(1:5, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:5, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(gno.csb24$Log2IBCR, gno.csb24$Sample, IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(gno.csb24, gno.csb24$Sample)
+ 
+no.outliers.nocsb24 <- NULL
+for (i in 1:5){
+out <- subset(datas[[i]], datas[[i]]$Log2IBCR > Lowers[i] & datas[[i]]$Log2IBCR < Uppers[i])
+no.outliers.nocsb24 <- rbind(no.outliers.nocsb24, out)
+}
+```
+
+```{r}
+# Outlier removal: WCL 7 Days
+list_quantiles <- tapply(gno.csb7$Log2IBCR, gno.csb7$Sample, quantile, na.rm = T)
+ 
+Q1s <- sapply(1:5, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:5, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(gno.csb7$Log2IBCR, gno.csb7$Sample, IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(gno.csb7, gno.csb7$Sample)
+ 
+no.outliers.nocsb7 <- NULL
+for (i in 1:5){
+out <- subset(datas[[i]], datas[[i]]$Log2IBCR > Lowers[i] & datas[[i]]$Log2IBCR < Uppers[i])
+no.outliers.nocsb7 <- rbind(no.outliers.nocsb7, out)
+}
+```
+
+```{r}
+# Outlier removal: WCL 14 Days
+list_quantiles <- tapply(gno.csb14$Log2IBCR, gno.csb14$Sample, quantile, na.rm = T)
+ 
+Q1s <- sapply(1:5, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:5, function(i) list_quantiles[[i]][4])
+
+IQRs <- tapply(gno.csb14$Log2IBCR, gno.csb14$Sample, IQR, na.rm = T)
+
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(gno.csb14, gno.csb14$Sample)
+ 
+no.outliers.nocsb14 <- NULL
+for (i in 1:5){
+out <- subset(datas[[i]], datas[[i]]$Log2IBCR > Lowers[i] & datas[[i]]$Log2IBCR < Uppers[i])
+no.outliers.nocsb14 <- rbind(no.outliers.nocsb14, out)
+}
+```
+
+```{r}
+# Combine all outlier removed data into one set and save to use for linear regression
+outliers.removed.master <- rbind(no.outliers.csb24, no.outliers.csb7, no.outliers.csb14, no.outliers.nocsb24, no.outliers.nocsb7, no.outliers.nocsb14)
+
+# Original datset had 3628 rows and after outlier removal there are 2943 rows
+write.csv(outliers.removed.master, "WBData_OutlierRemoved_ForLinReg.csv")
+```
+
+
+### Dunn's Tests
+
+```{r}
+# Initial test for significance for whole cell lysate data
+krusk.no24 <- kruskal.test(Log2IBCR ~ Sample, data = no.outliers.nocsb24)
+krusk.no24
+krusk.no7 <- kruskal.test(Log2IBCR ~ Sample, data = no.outliers.nocsb7)
+krusk.no7
+krusk.no14 <- kruskal.test(Log2IBCR ~ Sample, data = no.outliers.nocsb14)
+krusk.no14
+# All results are significant
+```
+
+```{r}
+# Initial test for significance for mechanical fraction data
+krusk.24 <- kruskal.test(Log2IBCR ~ Sample, data = no.outliers.csb24)
+krusk.24
+krusk.7 <- kruskal.test(Log2IBCR ~ Sample, data = no.outliers.csb7)
+krusk.7
+krusk.14 <- kruskal.test(Log2IBCR ~ Sample, data = no.outliers.csb14)
+krusk.14
+# All results are significant
+```
+
+```{r}
+library(ggpubr)
+library(rstatix)
+
+dunn0 <- no.outliers.nocsb24 %>%
+  group_by(Target) %>%
+  dunn_test(Log2IBCR ~ Sample, p.adjust.method = "bonferroni")
+dunn0 <- dunn0 %>% add_xy_position(x = "Sample")
+dunn0
+
+dunn1 <- dunn_test(no.outliers.nocsb7, Log2IBCR ~ Sample, p.adjust.method = "bonferroni")
+dunn1 <- dunn1 %>% add_xy_position(x = "Sample")
+dunn1
+
+dunn2 <- dunn_test(no.outliers.nocsb14, Log2IBCR ~ Sample, p.adjust.method = "bonferroni")
+dunn2 <- dunn2 %>% add_xy_position(x = "Sample")
+dunn2
+
+dunn3 <- dunn_test(no.outliers.csb24, Log2IBCR ~ Sample, p.adjust.method = "bonferroni")
+dunn3 <- dunn3 %>% add_xy_position(x = "Sample")
+dunn3
+
+dunn4 <- dunn_test(no.outliers.csb7, Log2IBCR ~ Sample, p.adjust.method = "bonferroni")
+dunn4 <- dunn4 %>% add_xy_position(x = "Sample")
+dunn4
+
+dunn5 <- dunn_test(no.outliers.csb14, Log2IBCR ~ Sample, p.adjust.method = "bonferroni")
+dunn5 <- dunn5 %>% add_xy_position(x = "Sample")
+dunn5
+```
+
+```{r}
+# Additional statistical test
+dunn6 <- no.outliers.nocsb24 %>%
+  group_by(Sample) %>%
+  dunn_test(Log2IBCR ~ Target) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+# Add p-values onto the box plots
+dunn6 <- dunn6 %>% add_y_position()
+dunn6 <- dunn6 %>% add_x_position(x = "Sample", group = "Target")
+```
+
+```{r}
+# Additional statistical test
+dunn7 <- no.outliers.nocsb7 %>%
+  group_by(Sample) %>%
+  dunn_test(Log2IBCR ~ Target) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+# Add p-values onto the box plots
+dunn7 <- dunn7 %>% add_y_position()
+dunn7 <- dunn7 %>% add_x_position(x = "Sample", group = "Target")
+```
+
+```{r}
+# Additional statistical test
+dunn8 <- no.outliers.nocsb14 %>%
+  group_by(Sample) %>%
+  dunn_test(Log2IBCR ~ Target) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+# Add p-values onto the box plots
+dunn8 <- dunn8 %>% add_y_position()
+dunn8 <- dunn8 %>% add_x_position(x = "Sample", group = "Target")
+```
+
+```{r}
+g7 <- ggplot(no.outliers.nocsb24, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Whole Cell Lysate: 24 Hours") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors) +
+  stat_pvalue_manual(dunn6, hide.ns = T, tip.length = 0, y.position = c(2.6, 3.1, 3.6, 4.1, 1.2, 1.7, 1, 1.5, 0, 0, 1.5, 2, 2.5, 0.6, 1.1))
+g8 <- ggplot(no.outliers.nocsb7, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Whole Cell Lysate: 7 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors) +
+  stat_pvalue_manual(dunn7, hide.ns = T, tip.length = 0, y.position = c(2.6, 1.7, 2.2, 2.7, -0.5, 0, 0, -0.3, 0.2, 0.7))
+g9 <- ggplot(no.outliers.nocsb14, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Whole Cell Lysate: 14 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors) +
+  stat_pvalue_manual(dunn8, hide.ns = T, tip.length = 0, y.position = c(1.5, 2, 2.5, 0.6, 0, 0.5, 1))
+```
+
+```{r}
+grid.arrange(g7, g8, g9, ncol = 1, nrow = 3)
+```
+
+```{r}
+# Additional statistical test
+dunn6.1 <- no.outliers.csb24 %>%
+  group_by(Sample) %>%
+  dunn_test(Log2IBCR ~ Target) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+# Add p-values onto the box plots
+dunn6.1 <- dunn6.1 %>% add_y_position()
+dunn6.1 <- dunn6.1 %>% add_x_position(x = "Sample", group = "Target")
+```
+
+```{r}
+# Additional statistical test
+dunn7.1 <- no.outliers.csb7 %>%
+  group_by(Sample) %>%
+  dunn_test(Log2IBCR ~ Target) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+# Add p-values onto the box plots
+dunn7.1 <- dunn7.1 %>% add_y_position()
+dunn7.1 <- dunn7.1 %>% add_x_position(x = "Sample", group = "Target")
+```
+
+```{r}
+# Additional statistical test
+dunn8.1 <- no.outliers.csb14 %>%
+  group_by(Sample) %>%
+  dunn_test(Log2IBCR ~ Target) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+# Add p-values onto the box plots
+dunn8.1 <- dunn8.1 %>% add_y_position()
+dunn8.1 <- dunn8.1 %>% add_x_position(x = "Sample", group = "Target")
+```
+
+```{r}
+g7.1 <- ggplot(no.outliers.csb24, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Mechanical Fraction: 24 Hours") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors) +
+  stat_pvalue_manual(dunn6.1, hide.ns = T, tip.length = 0, y.position = c(2, 2.5, 3, 3.5, 4, 4.5, 3.5, 4, 4.5, 0, 0.5, 1, 1.5, 1.5, 2.7, 3.2, 2.2, 2.7, 3.2))
+g8.1 <- ggplot(no.outliers.csb7, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Mechanical Fraction: 7 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors) +
+  stat_pvalue_manual(dunn7.1, hide.ns = T, tip.length = 0, y.position = c(2.5, 3, 3.5, 2.5, 3, 3.5, -1, -0.3, 0.2, 0.7, 1.2, 3.5, 2, 2.5))
+g9.1 <- ggplot(no.outliers.csb14, aes(Sample, Log2IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(option = "B") +
+  labs(y = expression(atop(bold("Relative to IBC"), atop(bold(Log[2])))), x = " ", title = "Mechanical Fraction: 14 Days") +
+  fig.theme +
+  scale_fill_manual(values = fig.colors) +
+  stat_pvalue_manual(dunn8.1, hide.ns = T, tip.length = 0, y.position = c(2.5, 3, 3.5, 4.2, 1, -0.5, 0, 0.5, 3.5, 4))
+```
+
+```{r}
+grid.arrange(g7.1, g8.1, g9.1, ncol = 1, nrow = 3)
+```
+

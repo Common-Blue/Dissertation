@@ -1,0 +1,638 @@
+---
+title: "Consolidating Morphology Data"
+author: "Elizabeth Byers"
+date: "2025-03-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+## Load Data
+
+```{r}
+# Find nuclei files
+nuclei <- list.files(path = "C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei", pattern = "[0-9]{2}_[0-9]{2}[a-z]{1}_Nuc_40x_[0-9]{1}_EditedNuclei.csv")
+lamin <- list.files(path = "C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei", pattern = "[0-9]{2}_[0-9]{2}[a-z]{1}_NucLam_40x_[0-9]{1}_EditedNuclei.csv")
+```
+
+### Consolidate Nuclei Data ------------------------------
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei")
+# Load all NUCLEI csv's and combine into one dataframe
+b <- data.frame()
+for (h in 1:length(nuclei)) {
+  a <- read.csv(nuclei[[h]])
+  b <- rbind(a, b)
+}
+```
+
+```{r}
+# Export master NUCLEI dataframe
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Analysis")
+write.csv(b, file = "All Nuclei Data.csv")
+```
+
+### Consolidate Nuclei with Lamin Data ------------------------------
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei")
+# Add surface and time point to individual csv's and save them.  This must be done before combining all csv's into one large dataframe.
+for (i in 1:length(lamin)) {
+ csv <- read.csv(lamin[[i]])
+ csv$Surface <- rep(substring(lamin[[i]], first = 1, last = 2), nrow(csv))
+ csv$Time.Point <- rep(substring(lamin[[i]], first = 4, last = 6), nrow(csv))
+ write.csv(csv, file = lamin[[i]])
+}
+```
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei")
+# Load all NUCLAM csv's and combine into one dataframe
+d <- data.frame()
+for (j in 1:length(lamin)) {
+  c <- read.csv(lamin[[j]])
+  d <- rbind(c, d)
+}
+```
+
+```{r}
+# Export master NUCLEI and LAMIN dataframe
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Analysis")
+write.csv(d, file = "All Nuclei and Lamin Data.csv")
+```
+
+
+
+### Consolidate Cell Body Data ----------------------------
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Cell Body 2026")
+# Add surface and time point to individual CELL BODY information csv's and save them.  This must be done before combining all csv's into one large dataframe.
+body <- list.files(path = "C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Cell Body 2026", pattern = "[0-9]{2}_[0-9]{2}[a-z]{1}_[0-9]{1}_Cells.csv")
+for (i in 1:length(body)) {
+ csv.b <- read.csv(body[[i]])
+ csv.b$Surface <- rep(substring(body[[i]], first = 1, last = 2), nrow(csv.b))
+ csv.b$Time.Point <- rep(substring(body[[i]], first = 4, last = 6), nrow(csv.b))
+ write.csv(csv.b, file = body[[i]])
+}
+```
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Cell Body 2026")
+# Load all CELL BODY csv's and combine into one dataframe
+e <- data.frame()
+for (k in 1:length(body)) {
+  f <- read.csv(body[[k]])
+  e <- rbind(e, f)
+}
+```
+
+```{r}
+e$Time.Point <- gsub("24h", "24 Hours", e$Time.Point)
+e$Time.Point <- gsub("07d", "7 Days", e$Time.Point)
+e$Time.Point <- gsub("14d", "14 Days", e$Time.Point)
+e$Time.Point <- factor(e$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+e$Surface <- gsub(3, "3%", e$Surface)
+e$Surface <- gsub(4, "4%", e$Surface)
+e$Surface <- gsub(6, "6%", e$Surface)
+e$Surface <- gsub(7, "7%", e$Surface)
+e$Surface <- gsub(8, "8%", e$Surface)
+e$Surface <- gsub(10, "10%", e$Surface)
+e$Surface <- gsub(0, "Control", e$Surface)
+e$Surface <- gsub("1Control%", "10%", e$Surface)
+e$Surface <- factor(e$Surface, levels = c("Control", "3%", "4%", "6%", "7%", "8%", "10%"))
+```
+
+```{r}
+# Export master CELL BODY dataframe
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/R Files")
+write.csv(e, "Completed Cell Body Dataset.csv")
+```
+
+
+### Reload and Clean Master Dataframes ----------------------
+Nuclei only data
+
+```{r}
+nuc <- read.csv("All Nuclei Data.csv")
+```
+
+```{r}
+library(dplyr)
+library(tidyselect)
+```
+
+```{r}
+# nuc <- nuc[, colSums(is.na(nuc)) != 0]
+not_all_na <- function(x) any(!is.na(x))
+nuc <- select(nuc, where(not_all_na))
+```
+
+```{r}
+nuc$Time.Point <- gsub("24h", "24 Hours", nuc$Time.Point)
+nuc$Time.Point <- gsub("07d", "7 Days", nuc$Time.Point)
+nuc$Time.Point <- gsub("14d", "14 Days", nuc$Time.Point)
+nuc$Time.Point <- factor(nuc$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+nuc$Surface <- gsub(0, "Control", nuc$Surface)
+nuc$Surface <- gsub(6, "6%", nuc$Surface)
+nuc$Surface <- gsub(7, "7%", nuc$Surface)
+nuc$Surface <- gsub(8, "8%", nuc$Surface)
+nuc$Surface <- gsub("1Control", "10%", nuc$Surface)
+nuc$Surface <- factor(nuc$Surface, levels = c("Control", "6%", "7%", "8%", "10%"))
+```
+
+```{r}
+# Ensure there are no NAs left that may have been introduced during binding rows or substitutions
+nuc <- nuc[!is.na(nuc$Surface), ]
+write.csv(nuc, file = "All Nuclei Data.csv")
+```
+
+Lamin only data
+
+```{r}
+lam <- read.csv("All Nuclei and Lamin Data.csv")
+```
+
+```{r}
+lam <- lam[, 5:238]
+```
+
+```{r}
+lam$Time.Point <- gsub("24h", "24 Hours", lam$Time.Point)
+lam$Time.Point <- gsub("07d", "7 Days", lam$Time.Point)
+lam$Time.Point <- gsub("14d", "14 Days", lam$Time.Point)
+lam$Time.Point <- factor(lam$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+lam$Surface <- gsub(0, "Control", lam$Surface)
+lam$Surface <- gsub(6, "6%", lam$Surface)
+lam$Surface <- gsub(7, "7%", lam$Surface)
+lam$Surface <- gsub(8, "8%", lam$Surface)
+lam$Surface <- gsub("1Control", "10%", lam$Surface)
+lam$Surface <- factor(lam$Surface, levels = c("Control", "6%", "7%", "8%", "10%"))
+```
+
+```{r}
+# Ensure there are no NAs left that may have been introduced during binding rows or substitutions
+lam <- select(lam, where(not_all_na))
+write.csv(lam, file = "All Nuclei and Lamin Data.csv")
+```
+
+Try to combine all nucleus data into one data frame
+
+```{r}
+nuc <- read.csv("All Nuclei Data.csv")
+lam <- read.csv("All Nuclei and Lamin Data.csv")
+```
+
+```{r}
+combined <- full_join(nuc, lam)
+write.csv(combined, "Combined Nuclei Data as of 3-31-25.csv")
+```
+
+
+```{r}
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei")
+files <- list.files(path = wd, pattern = "[0]{1}[3-4]{1}_[0-9]{2}[a-z]{1}_Nuc_40x_[0-9]{1}_EditedNuclei.csv")
+```
+
+```{r}
+# Add surface and time point to individual csv's and save them.  This must be done before combining all csv's into one large dataframe.
+for (i in 1:length(files)) {
+ csv <- read.csv(files[[i]])
+ csv$Surface <- rep(substring(files[[i]], first = 1, last = 2), nrow(csv))
+ csv$Time.Point <- rep(substring(files[[i]], first = 4, last = 6), nrow(csv))
+ write.csv(csv, file = files[[i]])
+}
+```
+
+```{r}
+# Load all csv's and combine into one dataframe
+b <- data.frame()
+for (j in 1:length(files)) {
+  a <- read.csv(files[[j]])
+  b <- rbind(a, b)
+}
+```
+
+```{r}
+b$Time.Point <- gsub("24h", "24 Hours", b$Time.Point)
+b$Time.Point <- gsub("07d", "7 Days", b$Time.Point)
+b$Time.Point <- gsub("14d", "14 Days", b$Time.Point)
+b$Time.Point <- factor(b$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+b$Surface <- gsub(3, "3%", b$Surface)
+b$Surface <- gsub(4, "4%", b$Surface)
+b$Surface <- factor(b$Surface, levels = c("3%", "4%"))
+```
+
+```{r}
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/Nuclei")
+files <- list.files(path = wd, pattern = "[0]{1}[3-4]{1}_[0-9]{2}[a-z]{1}_NucLam_40x_[0-9]{1}_EditedNuclei.csv")
+```
+
+```{r}
+# Add surface and time point to individual csv's and save them.  This must be done before combining all csv's into one large dataframe.
+for (i in 1:length(files)) {
+ csv <- read.csv(files[[i]])
+ csv$Surface <- rep(substring(files[[i]], first = 1, last = 2), nrow(csv))
+ csv$Time.Point <- rep(substring(files[[i]], first = 4, last = 6), nrow(csv))
+ write.csv(csv, file = files[[i]])
+}
+```
+
+```{r}
+# Load all csv's and combine into one dataframe
+b <- data.frame()
+for (j in 1:3) {
+  a <- read.csv(files[[j]])
+  b <- rbind(a, b)
+}
+c <- data.frame()
+for (k in 4:6) {
+  d <- read.csv(files[[k]])
+  c <- rbind(d, c)
+}
+```
+
+```{r}
+b$Time.Point <- gsub("24h", "24 Hours", b$Time.Point)
+b$Time.Point <- gsub("07d", "7 Days", b$Time.Point)
+b$Time.Point <- gsub("14d", "14 Days", b$Time.Point)
+b$Time.Point <- factor(b$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+b$Surface <- gsub(3, "3%", b$Surface)
+b$Surface <- gsub(4, "4%", b$Surface)
+b$Surface <- factor(b$Surface, levels = c("3%", "4%"))
+
+c$Time.Point <- gsub("24h", "24 Hours", c$Time.Point)
+c$Time.Point <- gsub("07d", "7 Days", c$Time.Point)
+c$Time.Point <- gsub("14d", "14 Days", c$Time.Point)
+c$Time.Point <- factor(c$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+c$Surface <- gsub(3, "3%", c$Surface)
+c$Surface <- gsub(4, "4%", c$Surface)
+c$Surface <- factor(c$Surface, levels = c("3%", "4%"))
+```
+
+```{r}
+# Ensure there are no NAs left that may have been introduced during binding rows or substitutions
+total2 <- b[!is.na(b$Surface), ]
+total3 <- c[!is.na(c$Surface), ]
+```
+
+```{r}
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/R Files")
+previous.data <- read.csv("Combined Nuclei Data as of 3-31-25.csv")
+```
+
+
+```{r}
+# combined1 <- full_join(total, total2)
+# combined2 <- full_join(combined1, total3)
+# combined3 <- full_join(combined2, previous.data)
+write.csv(combined3, "Completed Nuclei and Lamin Dataset.csv")
+```
+
+### Consolidate Cadherin Data ----------------------------
+
+#### Control Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/Control/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df <- bind_rows(myfiles)
+df <- bind_cols(df, rep.int("Control", length(df$X)), rep.int("24 Hours", length(df$X)))
+names(df)[18] <- "Surface"
+names(df)[19] <- "TimePoint"
+df <- df[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/Control/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df2 <- bind_rows(myfiles)
+df2 <- bind_cols(df2, rep.int("Control", length(df2$X)), rep.int("7 Days", length(df2$X)))
+names(df2)[18] <- "Surface"
+names(df2)[19] <- "TimePoint"
+df2 <- df2[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/Control/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df3 <- bind_rows(myfiles)
+df3 <- bind_cols(df3, rep.int("Control", length(df3$X)), rep.int("14 Days", length(df3$X)))
+names(df3)[18] <- "Surface"
+names(df3)[19] <- "TimePoint"
+df3 <- df3[, 2:19]
+```
+
+#### 6% Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/6%/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df4 <- bind_rows(myfiles)
+df4 <- bind_cols(df4, rep.int("6%", length(df4$X)), rep.int("24 Hours", length(df4$X)))
+names(df4)[18] <- "Surface"
+names(df4)[19] <- "TimePoint"
+df4 <- df4[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/6%/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df5 <- bind_rows(myfiles)
+df5 <- bind_cols(df5, rep.int("6%", length(df5$X)), rep.int("7 Days", length(df5$X)))
+df5 <- df5[, -c(18:19)]
+names(df5)[18] <- "Surface"
+names(df5)[19] <- "TimePoint"
+df5 <- df5[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/6%/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df6 <- bind_rows(myfiles)
+df6 <- bind_cols(df6, rep.int("6%", length(df6$X)), rep.int("14 Days", length(df6$X)))
+names(df6)[16] <- "Surface"
+names(df6)[17] <- "TimePoint"
+df6 <- df6[, 2:17]
+```
+
+#### 7% Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/7%/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df7 <- bind_rows(myfiles)
+df7 <- bind_cols(df7, rep.int("7%", length(df7$X)), rep.int("24 Hours", length(df7$X)))
+names(df7)[18] <- "Surface"
+names(df7)[19] <- "TimePoint"
+df7 <- df7[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/7%/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df8 <- bind_rows(myfiles)
+df8 <- bind_cols(df8, rep.int("7%", length(df8$X)), rep.int("7 Days", length(df8$X)))
+names(df8)[18] <- "Surface"
+names(df8)[19] <- "TimePoint"
+df8 <- df8[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/7%/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df9 <- bind_rows(myfiles)
+df9 <- bind_cols(df9, rep.int("7%", length(df9$X)), rep.int("14 Days", length(df9$X)))
+names(df9)[18] <- "Surface"
+names(df9)[19] <- "TimePoint"
+df9 <- df9[, 2:19]
+```
+
+#### 8% Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/8%/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df10 <- bind_rows(myfiles)
+df10 <- bind_cols(df10, rep.int("8%", length(df10$X)), rep.int("24 Hours", length(df10$X)))
+names(df10)[18] <- "Surface"
+names(df10)[19] <- "TimePoint"
+df10 <- df10[, 2:19]
+```
+
+```{r}
+# Set working directory - NO CADHERIN 8% 7 DAYS 
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/8%/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df11 <- bind_rows(myfiles)
+df11 <- bind_cols(df11, rep.int("8%", length(df11$X)), rep.int("7 Days", length(df11$X)))
+names(df11)[18] <- "Surface"
+names(df11)[19] <- "TimePoint"
+df11 <- df11[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/8%/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df12 <- bind_rows(myfiles)
+df12 <- bind_cols(df12, rep.int("8%", length(df12$X)), rep.int("14 Days", length(df12$X)))
+names(df12)[18] <- "Surface"
+names(df12)[19] <- "TimePoint"
+df12 <- df12[, 2:19]
+```
+
+#### 10% Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/10%/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df13 <- bind_rows(myfiles)
+df13 <- bind_cols(df13, rep.int("10%", length(df13$X)), rep.int("24 Hours", length(df13$X)))
+names(df13)[18] <- "Surface"
+names(df13)[19] <- "TimePoint"
+df13 <- df13[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/10%/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df14 <- bind_rows(myfiles)
+df14 <- bind_cols(df14, rep.int("10%", length(df14$X)), rep.int("7 Days", length(df14$X)))
+names(df14)[16] <- "Surface"
+names(df14)[17] <- "TimePoint"
+df14 <- df14[, 2:17]
+```
+
+```{r}
+# Set working directory - NO CADHERIN 10% 7 DAYS 
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/10%/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df15 <- bind_rows(myfiles)
+df15 <- bind_cols(df15, rep.int("10%", length(df15$X)), rep.int("14 Days", length(df15$X)))
+names(df15)[18] <- "Surface"
+names(df15)[19] <- "TimePoint"
+df15 <- df15[, 2:19]
+```
+
+#### 3% Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/3%/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df16 <- bind_rows(myfiles)
+df16 <- bind_cols(df16, rep.int("3%", length(df16$X)), rep.int("24 Hours", length(df16$X)))
+names(df16)[18] <- "Surface"
+names(df16)[19] <- "TimePoint"
+df16 <- df16[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/3%/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df17 <- bind_rows(myfiles)
+df17 <- bind_cols(df17, rep.int("3%", length(df17$X)), rep.int("7 Days", length(df17$X)))
+names(df17)[18] <- "Surface"
+names(df17)[19] <- "TimePoint"
+df17 <- df17[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/3%/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df18 <- bind_rows(myfiles)
+df18 <- bind_cols(df18, rep.int("3%", length(df18$X)), rep.int("14 Days", length(df18$X)))
+names(df18)[18] <- "Surface"
+names(df18)[19] <- "TimePoint"
+df18 <- df18[, 2:19]
+```
+
+#### 4% Surfaces
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/4%/24 Hours")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df19 <- bind_rows(myfiles)
+df19 <- bind_cols(df19, rep.int("4%", length(df19$X)), rep.int("24 Hours", length(df19$X)))
+names(df19)[18] <- "Surface"
+names(df19)[19] <- "TimePoint"
+df19 <- df19[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/4%/7 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df20 <- bind_rows(myfiles)
+df20 <- bind_cols(df20, rep.int("4%", length(df20$X)), rep.int("7 Days", length(df20$X)))
+names(df20)[18] <- "Surface"
+names(df20)[19] <- "TimePoint"
+df20 <- df20[, 2:19]
+```
+
+```{r}
+# Set working directory
+wd <- setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cadherin ImageJ Analysis/4%/14 Days")
+# Load all csv's
+temp <- list.files(pattern="\\.csv$")
+myfiles <- lapply(temp, read.csv)
+# Combine all tables together
+df21 <- bind_rows(myfiles)
+df21 <- bind_cols(df21, rep.int("4%", length(df21$X)), rep.int("14 Days", length(df21$X)))
+names(df21)[18] <- "Surface"
+names(df21)[19] <- "TimePoint"
+df21 <- df21[, 2:19]
+```
+
+### Combine individual dataframes from each surface and time point into one master dataframe
+
+```{r}
+combined16 <- bind_rows(df6, df14)
+combined18 <- bind_rows(df, df2, df3, df4, df5, df7, df8, df9, df10, df12, df13, df16, df17, df18, df19, df20, df21)
+```
+
+```{r}
+combined.and.reduced16 <- combined16[, c(1:4, 6, 12:16)]
+combined.and.reduced18 <- combined18[, c(1:4, 6, 14:18)]
+combined.all <- bind_rows(combined.and.reduced16, combined.and.reduced18)
+```
+
+```{r}
+# Fix factor level issues
+combined.all$Surface <- factor(combined.all$Surface, levels = c("Control", "3%", "4%", "6%", "7%", "8%", "10%"))
+combined.all$TimePoint <- factor(combined.all$TimePoint, levels = c("24 Hours", "7 Days", "14 Days"))
+```
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/R Files")
+write.csv(combined.all, file = "Completed Cadherin Dataset.csv", col.names = T)
+```
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/R Files")
+vin.data <- read.csv("Completed Vinculin Dataset.csv", header = T)
+cad.data <- read.csv("Completed Cadherin Dataset.csv", header = T)
+```
+
+

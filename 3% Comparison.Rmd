@@ -1,0 +1,232 @@
+---
+title: "3% Comparison"
+output: html_document
+date: "2025-04-03"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+# Libraries to load
+library(ggplot2)
+library(pheatmap)
+library(rstatix)
+library(ggpubr)
+```
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/Thesis Studies/Cell Profiler Results/3% Comparisons/")
+pmma <- read.csv("PMMA_ONLY_EditedCellBody.csv")
+tbab <- read.csv("PMMA_TBAB_EditedCellBody.csv")
+```
+
+```{r}
+all <- rbind(pmma, tbab)
+```
+
+```{r}
+# Remove outliers
+all$ObservationNo <- 1:nrow(all)
+vars <- colnames(all)
+outliers.removed <- list()
+```
+
+```{r}
+for (i in 1:length(vars)) {
+  # Find the 0, 25, 50, 75, and 100% quantiles for each surface and variable combination
+  list_quantiles <- tapply(all[, i], list(all$Surface), quantile, na.rm = T)
+  # Isolate the 1st and 3rd quartiles
+  Q1s <- sapply(1:2, function(i) list_quantiles[[i]][2])
+  Q3s <- sapply(1:2, function(i) list_quantiles[[i]][4])
+  # Find the interquartile range for each combination
+  IQRs <- tapply(all[, i], list(all$Surface), IQR, na.rm = T)
+  # Establish the limits used to determine where outliers fall
+  Lowers <- Q1s - 1.5*IQRs
+  Uppers <- Q3s + 1.5*IQRs
+  # Break up the dataframe into individual ones for each combination
+  datas <- split(all[, c(i, 25)], list(all$Surface))
+  temp <- c()
+  for (j in 1:length(datas)) {
+    out <- subset(datas[[j]], datas[[j]][, 1] > Lowers[j] & datas[[j]][, 1] < Uppers[j])
+    temp <- rbind(temp, out)
+  }
+  outliers.removed[[i]] <- temp
+  names(outliers.removed)[i] <- vars[i]
+}
+```
+
+```{r}
+library(dplyr) # This contains full_join
+a <- outliers.removed[[1]]
+for (h in 2:length(outliers.removed)) {
+  b <- outliers.removed[[h]]
+  # Full_join is a magical function that combines data frames based on matching rows and puts in NAs where there aren't any matching data
+  a <- full_join(a, b)
+}
+```
+
+```{r}
+out <- cbind(a, all[, 24])
+colnames(out)[25] <- c("Surface")
+```
+
+```{r}
+pheatmap(as.matrix(all[, -c(24:25)]), show_rownames = F, show_colnames = F, scale = "column", cluster_rows = F, cluster_cols = F, border_color = "none")
+```
+
+```{r}
+maxes <- c()
+for (i in 1:length(colnames(all))) {
+  maxes[i] <- max(all[, i])
+}
+```
+
+```{r}
+grep("Inf", all[, 14])
+# [1]  82 550 637
+# Remove these rows
+all <- all[-c(82, 550, 637), ]
+```
+
+```{r}
+quant <- all[, -c(1, 24:25)]
+pc <- prcomp(quant, center = T, scale = T)
+summary(pc)
+# PC1 accounts for 40.6% of the variance
+# PC2 accounts for 21.24% of the variance
+```
+
+```{r}
+x <- pc$x
+pca <- data.frame(x, all$Surface)
+colnames(pca)[23] <- c("Surface")
+```
+
+```{r}
+ggplot(pca, aes(x = PC1, y = PC2, col = Surface)) +
+  geom_point(size = 1, alpha = 0.8) +
+  # scale_colour_viridis_d(option = "D", "Surface") +
+  scale_color_manual(values = c("#002060", "#918665")) +
+  theme(axis.text.y = element_text(colour = "black", size = 10)) +
+  theme(axis.text.x = element_text(colour = "black", size = 10)) +
+  theme(axis.title.y = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 14, face = "bold")) +
+  theme(panel.border = element_blank()) +
+  theme(axis.line = element_line(colour = "black")) +
+  theme(legend.position = "right") +
+  theme(legend.text = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 14, face = "bold"),
+        panel.background = element_rect(fill = "white"))
+```
+
+```{r}
+library(reshape2)
+out.area <- out[, c(3, 4, 10, 25)]
+df.m.area <- melt(out.area, id.var = "Surface")
+out.rest <- out[, c(5:9, 11:25)]
+df.m.rest <- melt(out.rest, id.var = "Surface")
+```
+
+```{r}
+ggplot(data = df.m.area, aes(x = variable, y = value, fill = Surface)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 0))
+ggplot(data = df.m.rest, aes(x = variable, y = value, fill = Surface)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r}
+stat.test1 <- out %>%
+  dunn_test(AreaShape_Area ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test2 <- out %>%
+  dunn_test(AreaShape_BoundingBoxArea ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test3 <- out %>%
+  dunn_test(AreaShape_BoundingBoxMaximum_X ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test4 <- out %>%
+  dunn_test(AreaShape_BoundingBoxMaximum_Y ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test5 <- out %>%
+  dunn_test(AreaShape_BoundingBoxMinimum_X ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test6 <- out %>%
+  dunn_test(AreaShape_BoundingBoxMinimum_Y ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test7 <- out %>%
+  dunn_test(AreaShape_Compactness ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test8 <- out %>%
+  dunn_test(AreaShape_ConvexArea ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test9 <- out %>%
+  dunn_test(AreaShape_Eccentricity ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test10 <- out %>%
+  dunn_test(AreaShape_EquivalentDiameter ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test11 <- out %>%
+  dunn_test(AreaShape_Extent ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test12 <- out %>%
+  dunn_test(AreaShape_FormFactor ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test13 <- out %>%
+  dunn_test(AreaShape_MajorAxisLength ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test14 <- out %>%
+  dunn_test(AreaShape_MaxFeretDiameter ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test15 <- out %>%
+  dunn_test(AreaShape_MaximumRadius ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test16 <- out %>%
+  dunn_test(AreaShape_MeanRadius ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test17 <- out %>%
+  dunn_test(AreaShape_MedianRadius ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test18 <- out %>%
+  dunn_test(AreaShape_MinFeretDiameter ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test19 <- out %>%
+  dunn_test(AreaShape_MinorAxisLength ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test20 <- out %>%
+  dunn_test(AreaShape_Perimeter ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test21 <- out %>%
+  dunn_test(AreaShape_Solidity ~ Surface) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+```
+
+

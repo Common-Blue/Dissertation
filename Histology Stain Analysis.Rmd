@@ -1,0 +1,401 @@
+---
+title: "Histology Stain Analysis"
+author: "Elizabeth Byers"
+date: "2026-04-18"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+### Load libraries
+
+```{r, message=F, warning=F}
+library(ggplot2)
+library(gridExtra) # This allows ggplot graphs to be put in a grid to view all at once
+library(extrafont)
+library(ggbreak)
+library(ggbeeswarm)
+```
+
+### Loading in master csv containing all four quantifiable stains - ARS, Safranin O, Sirius red, and Oil Red O
+
+```{r}
+setwd("C:/Users/erbye/OneDrive - The Pennsylvania State University/Data/")
+```
+
+```{r}
+ada <- read.csv("./Thesis Studies/Histology/All Destain Absorbances.csv")
+```
+
+```{r}
+# Remove Surface numbers
+ada$Surface <- sub(pattern = "3% [0-9]", replacement = "3%", ada$Surface)
+ada$Surface <- sub(pattern = "4% [0-9]", replacement = "4%", ada$Surface)
+ada$Surface <- sub(pattern = "6% [0-9]", replacement = "6%", ada$Surface)
+ada$Surface <- sub(pattern = "7% [0-9]", replacement = "7%", ada$Surface)
+ada$Surface <- sub(pattern = "8% [0-9]", replacement = "8%", ada$Surface)
+ada$Surface <- sub(pattern = "10% [0-9]", replacement = "10%", ada$Surface)
+ada$Surface <- sub(pattern = "Control [0-9]", replacement = "Control", ada$Surface)
+
+ada$Surface <- factor(ada$Surface, levels = c("Control", "3%", "4%", "6%", "7%", "8%", "10%"))
+ada$Time.Point <- factor(ada$Time.Point, levels = c("14 Days", "21 Days"))
+```
+
+### Testing each stain for outliers
+
+***Alizarin Red***
+
+```{r}
+list_quantiles <- tapply(ada$ARS.mM.mm2, list(ada$Surface, ada$Time.Point), quantile, na.rm = T)
+ 
+Q1s <- sapply(1:14, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:14, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(ada$ARS.mM.mm2, list(ada$Surface, ada$Time.Point), IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(ada, list(ada$Surface, ada$Time.Point))
+ 
+arsno.outliers <- NULL
+for (i in 1:14){
+out <- subset(datas[[i]], datas[[i]]$ARS.mM.mm2 > Lowers[i] & datas[[i]]$ARS.mM.mm2 < Uppers[i])
+arsno.outliers <- rbind(arsno.outliers, out)
+}
+ 
+dim(arsno.outliers)
+## [1] 42   6
+# The really high value in control 21 days is not actually an outlier
+```
+
+***Safranin O***
+
+```{r}
+list_quantiles <- tapply(ada$SafO...wv.mm2, list(ada$Surface, ada$Time.Point), quantile, na.rm = T)
+ 
+Q1s <- sapply(1:14, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:14, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(ada$SafO...wv.mm2, list(ada$Surface, ada$Time.Point), IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(ada, list(ada$Surface, ada$Time.Point))
+ 
+safno.outliers <- NULL
+for (i in 1:14){
+out <- subset(datas[[i]], datas[[i]]$SafO...wv.mm2 > Lowers[i] & datas[[i]]$SafO...wv.mm2 < Uppers[i])
+safno.outliers <- rbind(safno.outliers, out)
+}
+ 
+dim(safno.outliers)
+## [1] 42   6
+```
+
+
+***Sirius Red***
+
+```{r}
+list_quantiles <- tapply(ada$SiriusRed...wv.mm2, list(ada$Surface, ada$Time.Point), quantile, na.rm = T)
+ 
+Q1s <- sapply(1:14, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:14, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(ada$SiriusRed...wv.mm2, list(ada$Surface, ada$Time.Point), IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(ada, list(ada$Surface, ada$Time.Point))
+ 
+sirno.outliers <- NULL
+for (i in 1:14){
+out <- subset(datas[[i]], datas[[i]]$SiriusRed...wv.mm2 > Lowers[i] & datas[[i]]$SiriusRed...wv.mm2 < Uppers[i])
+sirno.outliers <- rbind(sirno.outliers, out)
+}
+ 
+dim(sirno.outliers)
+## [1] 42   6
+```
+
+
+***Oil Red O***
+
+```{r}
+list_quantiles <- tapply(ada$OilRedO...wv.mm2, list(ada$Surface, ada$Time.Point), quantile, na.rm = T)
+ 
+Q1s <- sapply(1:14, function(i) list_quantiles[[i]][2])
+Q3s <- sapply(1:14, function(i) list_quantiles[[i]][4])
+ 
+IQRs <- tapply(ada$OilRedO...wv.mm2, list(ada$Surface, ada$Time.Point), IQR, na.rm = T)
+ 
+Lowers <- Q1s - 1.5*IQRs
+Uppers <- Q3s + 1.5*IQRs
+ 
+datas <- split(ada, list(ada$Surface, ada$Time.Point))
+ 
+oilno.outliers <- NULL
+for (i in 1:14){
+out <- subset(datas[[i]], datas[[i]]$OilRedO...wv.mm2 > Lowers[i] & datas[[i]]$OilRedO...wv.mm2 < Uppers[i])
+oilno.outliers <- rbind(oilno.outliers, out)
+}
+ 
+dim(oilno.outliers)
+## [1] 42   6
+```
+
+#### Results of outlier testing
+
+For all four quantifiable stains, no outliers were present.  Every data point was retained for downstream statistical testing or modeling.
+
+```{r}
+fig.theme <- theme(axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        axis.text.y.right = element_blank(),
+        axis.title.y = element_text(size = 12),
+        axis.ticks.y.right = element_blank(),
+        legend.position = "none",
+        panel.background = element_blank(),
+        axis.line.x.bottom = element_line(color = "gray", linewidth = 0.5),
+        axis.line.y.left = element_line(color = "black", linewidth = 1))
+```
+
+### Data analysis and graphing
+
+***Alizarin Red***
+
+```{r}
+ars <- ggplot(ada, aes(x = Surface, y = ARS.mM.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  scale_y_break(c(0.003, 0.009), ticklabels = 0.0095) +
+  scale_y_break(c(0.01, 0.0175), ticklabels = 0.018) +
+  labs(y = expression(paste("mM ARS per ", mm^{2}))) +
+  scale_fill_manual("Time Point", values = c("gray30", "gray70")) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        axis.text.y.right = element_blank(),
+        axis.title.y = element_text(size = 12),
+        axis.ticks.y.right = element_blank(),
+        legend.position = "none",
+        panel.background = element_blank(),
+        axis.line.x.bottom = element_line(color = "gray", linewidth = 0.5),
+        axis.line.y.left = element_line(color = "black", linewidth = 1))
+```
+
+***Safranin O***
+
+```{r}
+safo <- ggplot(ada, aes(x = Surface, y = SafO...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = expression(paste("% Safranin O per ", mm^{2}))) +
+  scale_fill_manual("Time Point", values = c("gray30", "gray70")) +
+  fig.theme
+```
+
+***Sirius Red***
+
+```{r}
+sirred <- ggplot(ada, aes(x = Surface, y = SiriusRed...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = expression(paste("% Sirius Red per ", mm^{2}))) +
+  scale_fill_manual("Time Point", values = c("gray30", "gray70")) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        axis.text.y.right = element_blank(),
+        axis.title.y = element_text(size = 12),
+        axis.ticks.y.right = element_blank(),
+        panel.background = element_blank(),
+        axis.line.x.bottom = element_line(color = "gray", linewidth = 0.5),
+        axis.line.y.left = element_line(color = "black", linewidth = 1))
+```
+
+***Oil Red O***
+
+```{r}
+oro <- ggplot(ada, aes(x = Surface, y = OilRedO...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = expression(paste("% Oil Red O ", mm^{2}))) +
+  scale_fill_manual("Time Point", values = c("gray30", "gray70")) +
+  fig.theme
+```
+
+#### Transformed axis plots
+
+```{r}
+ars2 <- ggplot(ada, aes(x = Surface, y = Log2.ARS.mM.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  scale_y_break(c(0.003, 0.009), ticklabels = 0.0095) +
+  scale_y_break(c(0.01, 0.0175), ticklabels = 0.018) +
+  labs(y = "mM ARS per square mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+safo2 <- ggplot(ada, aes(x = Surface, y = Log2.SafO...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = "% Safranin O per square mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+sirred2 <- ggplot(ada, aes(x = Surface, y = Log2.SiriusRed...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = "% Sirius Red per square mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+oro2 <- ggplot(ada, aes(x = Surface, y = Log2.OilRedO...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = "% Oil Red O per square mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+```
+
+
+```{r}
+ars10 <- ggplot(ada, aes(x = Surface, y = Log.ARS.mM.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  scale_y_break(c(0.003, 0.009), ticklabels = 0.0095) +
+  scale_y_break(c(0.01, 0.0175), ticklabels = 0.018) +
+  labs(y = expression(paste("mM ARS per ", mm^{2}))) +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+safo10 <- ggplot(ada, aes(x = Surface, y = Log.SafO...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = "% Safranin O per square mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+sirred10 <- ggplot(ada, aes(x = Surface, y = Log.SiriusRed...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = "% Sirius Red per mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+oro10 <- ggplot(ada, aes(x = Surface, y = Log.OilRedO...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = "% Oil Red O per square mm") +
+  scale_fill_manual("Time Point", values = c("coral", "lavender")) +
+  fig.theme
+```
+
+### Visualizing all plots
+
+```{r}
+# Graphs with normal y-axes - no transformations of any kind
+plots <- grid.arrange(ars, safo, sirred, oro, nrow = 2, ncol = 2)
+
+# Graphs of Log base 2 transformed data
+# grid.arrange(ars2, safo2, sirred2, oro2, nrow = 2, ncol = 2)
+
+# Graphs of Log base 10 transformed data
+# grid.arrange(ars10, safo10, sirred10, oro10, nrow = 2, ncol = 2)
+```
+
+There's no difference between log base 2 and log base 10 graphs.  There is also little difference between normal axis and either log transformation for safranin O or Oil Red O graphs.  ARS is the most changed due the the large box for flat and Sirius red has some slight differences in which boxes appear largest between the normal axis and log transformed graphs.  For the sake of clarity and not having to add another label indicating the axis is Log10, I'm going to use normal axes for these graphs.
+
+```{r}
+# I need a plot to crop the legend from
+ggplot(ada, aes(x = Surface, y = SiriusRed...wv.mm2, fill = Time.Point)) +
+  geom_boxplot(outliers = T) +
+  labs(y = expression(paste("% Sirius Red per ", mm^{2}))) +
+  scale_fill_manual("Time Point", values = c("gray30", "gray70")) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        axis.text.y.right = element_blank(),
+        axis.title.y = element_text(size = 12),
+        axis.ticks.y.right = element_blank(),
+        panel.background = element_blank(),
+        axis.line.x.bottom = element_line(color = "gray", linewidth = 0.5),
+        axis.line.y.left = element_line(color = "black", linewidth = 1))
+```
+
+
+```{r}
+library(svglite)
+ggsave("./Figures/Histological_Stains_Individual.svg", plot = plots, units = "in", width = 8, height = 5)
+ggsave("./Figures/Histological_Stains_SiriusRed.svg", plot = sirred, units = "in", width = 5, height = 4)
+```
+
+
+### Plotting all stains on one graph
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+ada.long <- ada %>%
+  select(Surface, Time.Point, ARS.mM.mm2, SafO...wv.mm2, SiriusRed...wv.mm2, OilRedO...wv.mm2) %>%
+  pivot_longer(cols = c(ARS.mM.mm2, SafO...wv.mm2, SiriusRed...wv.mm2, OilRedO...wv.mm2), names_to = "Stain", values_to = "Concentration")
+```
+
+```{r}
+ada.long$Stain <- gsub("ARS.mM.mm2", "Alizarin Red S", ada.long$Stain)
+ada.long$Stain <- gsub("SafO...wv.mm2", "Safranin O", ada.long$Stain)
+ada.long$Stain <- gsub("SiriusRed...wv.mm2", "Sirius Red", ada.long$Stain)
+ada.long$Stain <- gsub("OilRedO...wv.mm2", "Oil Red O", ada.long$Stain)
+```
+
+```{r}
+ggplot(ada.long, aes(x = Surface, y = Concentration, fill = Stain)) +
+  geom_boxplot() +
+  facet_grid(cols = vars(Time.Point), scales = "free_x", space = "free_x") +
+  scale_y_continuous(trans = "log10") +
+  labs(y = "Concentration per square mm") +
+  fig.theme
+```
+
+Honestly, every surface looks pretty similar in this graph except for ARS.  It's difficult to see any unique surface profiles.
+
+### Funsies with dimensional reduction
+
+```{r}
+library(Rdimtools)
+library(uwot)
+library(normalize)
+```
+
+```{r}
+set.seed(22)
+cent.scaled.x <- normalize(ada[, c(3,6,9,12)], center = T, scale = T)
+details <- ada[, c(1,2)]
+my.pca <- do.pca(cent.scaled.x, ndim = 2)
+pca.df <- cbind(my.pca$Y, details)
+colnames(pca.df)[1] <- c("PC1")
+colnames(pca.df)[2] <- c("PC2")
+```
+
+```{r}
+ggplot(pca.df, aes(x = PC1, y = PC2, color = Surface, shape = Time.Point)) + geom_point() +
+   scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665"))
+```
+
+```{r}
+set.seed(543)
+my.tsne <- do.tsne(x, ndim = 2, perplexity = 10)
+tsne.df <- cbind(my.tsne$Y, details)
+colnames(tsne.df)[1] <- c("tSNE1")
+colnames(tsne.df)[2] <- c("tSNE2")
+```
+
+```{r}
+ggplot(tsne.df, aes(x = tSNE1, y = tSNE2, color = Surface, shape = Time.Point)) + geom_point() +
+   scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665"))
+```
+
+```{r}
+set.seed(67)
+my.umap <- umap(x)
+umap.df <- cbind(my.umap, details)
+colnames(umap.df)[1] <- "UMAP1"
+colnames(umap.df)[2] <- "UMAP2"
+```
+
+```{r}
+ggplot(umap.df, aes(x = UMAP1, y = UMAP2, color = Surface, shape = Time.Point)) + geom_point() +
+   scale_color_manual(values = c("#1C86EE", "#002060", "#54A021", "#E6B91E", "#E76618", "#C42F1A", "#918665"))
+```
+
+

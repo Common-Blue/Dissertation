@@ -1,0 +1,665 @@
+---
+title: "Regression Model - Fiber to WB"
+output: html_document
+date: "2026-05-19"
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+
+```{r}
+library(ggplot2)
+library(ggpmisc)
+library(gridExtra)
+library(tidyr)
+library(svglite)
+library(dplyr)
+```
+
+```{r}
+fig.colors <- c("#918665", "#90C226", "#54A021", "#E6B91E", "#E76618", "#C42F1A")
+fig.theme <- theme(text = element_text(color = "black"),
+                   axis.title.x = element_blank(),
+                   axis.title.y = element_text(size = 12, face = "bold"),
+                   axis.text = element_text(size = 10),
+                   axis.text.x = element_text(angle = 45, hjust = 1),
+                   legend.position = "none",
+                   title = element_text(size = 12, face = "bold"),
+                   panel.background = element_rect(fill = "white"),
+                   axis.line = element_line(color = "black"))
+```
+
+## Analysis
+
+```{r warning=F message=F}
+# setwd("C:/Users/Elizabeth/OneDrive - The Pennsylvania State University/Data/")
+WB <- read.csv("WBData_OutlierRemoved_ForLinReg.csv")
+```
+
+```{r}
+# Remove unneeded columns
+WB <- WB[,c(2:5, 10)]
+```
+
+```{r}
+# Change Sample column to Surface to match existing code
+colnames(WB)[1] <- "Surface"
+```
+
+```{r}
+# Convert surface percentages (a categorical variable) to curvature values (a numerical predictor)
+WB$Surface <- gsub(pattern = "3%", replacement = 10.07, WB$Surface)
+WB$Surface <- gsub(pattern = "4%", replacement = 7.06, WB$Surface)
+WB$Surface <- gsub(pattern = "6%", replacement = 2.66, WB$Surface)
+WB$Surface <- gsub(pattern = "7%", replacement = 2.31, WB$Surface)
+WB$Surface <- gsub(pattern = "8%", replacement = 2.09, WB$Surface)
+WB$Surface <- gsub(pattern = "10%", replacement = 1.3, WB$Surface)
+WB$Surface <- gsub(pattern = "Control", replacement = 0, WB$Surface)
+```
+
+```{r}
+# Force numeric on Surface column
+WB$Surface <- as.numeric(WB$Surface)
+
+# Remove rows with NAs
+WB <- WB[complete.cases(WB), ]
+```
+
+```{r}
+# Pivot to wide format
+wide <- WB %>%
+  group_by(Surface, Time.Point, CSB.Treatment, Target) %>%
+  mutate(rep = row_number()) %>%
+  pivot_wider(
+    names_from = Target,
+    values_from = IBCR
+  )
+```
+
+```{r}
+# Separate into CSB and WCL
+wide.wcl <- wide[wide$CSB.Treatment == "No CSB", -4]
+wide.csb <- wide[wide$CSB.Treatment == "CSB", -4]
+```
+
+```{r}
+# make sure wide data frames are actually dataframes
+wide.wcl <- as.data.frame(wide.wcl)
+wide.csb <- as.data.frame(wide.csb)
+```
+
+### Briefly make some line graphs
+
+I thought maybe making line graphs for each separate surface might show some different kinds of trends?
+
+```{r warning=F message=F}
+setwd("C:/Users/Elizabeth/OneDrive - The Pennsylvania State University/Data/")
+WB.alt <- read.csv("./R Files/WBData_OutlierRemoved_ForLinReg.csv")
+```
+
+```{r}
+# Remove unneeded columns
+WB.alt <- WB.alt[,c(2:5, 10)]
+# Change Sample column to Surface to match existing code
+colnames(WB.alt)[1] <- "Surface"
+# Factor time points
+WB.alt$Time.Point <- factor(WB.alt$Time.Point, levels = c("24 Hours", "7 Days", "14 Days"))
+# Separate into CSB and WCL
+wcl.alt <- WB.alt[WB.alt$CSB.Treatment == "No CSB", ]
+csb.alt <- WB.alt[WB.alt$CSB.Treatment == "CSB", ]
+```
+
+```{r}
+wcl.alt.f <- wcl.alt[wcl.alt$Surface == "Control", ]
+wcl.alt.3 <- wcl.alt[wcl.alt$Surface == "3%", ]
+wcl.alt.4 <- wcl.alt[wcl.alt$Surface == "4%", ]
+wcl.alt.6 <- wcl.alt[wcl.alt$Surface == "6%", ]
+wcl.alt.7 <- wcl.alt[wcl.alt$Surface == "7%", ]
+wcl.alt.8 <- wcl.alt[wcl.alt$Surface == "8%", ]
+wcl.alt.10 <- wcl.alt[wcl.alt$Surface == "10%", ]
+
+csb.alt.f <- csb.alt[csb.alt$Surface == "Control", ]
+csb.alt.3 <- csb.alt[csb.alt$Surface == "3%", ]
+csb.alt.4 <- csb.alt[csb.alt$Surface == "4%", ]
+csb.alt.6 <- csb.alt[csb.alt$Surface == "6%", ]
+csb.alt.7 <- csb.alt[csb.alt$Surface == "7%", ]
+csb.alt.8 <- csb.alt[csb.alt$Surface == "8%", ]
+csb.alt.10 <- csb.alt[csb.alt$Surface == "10%", ]
+```
+
+```{r}
+ggplot(wcl.alt.f, aes(x = Time.Point, y = IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d()
+ggplot(csb.alt.f, aes(x = Time.Point, y = IBCR, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_viridis_d()
+```
+
+
+### Back to the actual goal of linear regression
+
+```{r}
+set.seed(444)
+# Create 10 training and test sets from CSB data and store in lists
+trainc <- list()
+testc <- list()
+for (i in 1:10) {
+  index <- sample(1:nrow(wide.csb), 0.8*nrow(wide.csb))
+  train.dfc <- wide.csb[index, ]
+  trainc[[i]] <- train.dfc
+  test.dfc <- wide.csb[-index, ]
+  testc[[i]] <- test.dfc
+}
+
+# Training sets have 45 observations and test sets have 12
+
+# Create 10 training and test sets from WCL data and store in lists
+trainw <- list()
+testw <- list()
+for (i in 1:10) {
+  index <- sample(1:nrow(wide.wcl), 0.8*nrow(wide.wcl))
+  train.dfw <- wide.wcl[index, ]
+  trainw[[i]] <- train.dfw
+  test.dfw <- wide.wcl[-index, ]
+  testw[[i]] <- test.dfw
+}
+```
+
+```{r}
+protein_cols <-  colnames(wide.wcl[-c(1:4)])
+mse_wcl <- matrix(nrow = 10, ncol = 6)
+mse_csb <- matrix(nrow = 10, ncol = 6)
+
+wcl_graphs <- list()
+csb_graphs <- list()
+
+for (i in 1:length(trainw)) {
+  new_list <- list()
+  for (j in 1:length(protein_cols)) {
+    reg <- lm(trainw[[i]][,protein_cols[j]]~Surface, data = trainw[[i]]) # Predict b-actin expression from surface curvature
+    pred <- predict(reg, testw[[i]]) # Use model to predict in a test set
+    data <- data.frame(pred, testw[[i]][,protein_cols[j]]) # Put predicted and actual values together
+    mse_wcl[i,j] <- mean((data[,2] - data[,1])^2) # Calculate MSE
+    new_list[[j]] <- ggplot(data = data, aes(x = testw..i.....protein_cols.j.., y = pred)) + 
+      geom_point() + 
+      geom_smooth(method = lm, se = F) +
+      stat_poly_eq(use_label("R2"), size = 4) +
+      labs(x = "Actual", y = "Predicted") +
+      theme(text = element_text(color = "black"),
+            axis.title = element_text(size = 12, face = "bold"),
+            axis.text = element_text(size = 10),
+            panel.background = element_rect(fill = "white"),
+            axis.line = element_line(color = "black"))
+  }
+  wcl_graphs[[i]] <- new_list
+}
+
+for (i in 1:length(trainc)) {
+  new_list2 <- list()
+  for (j in 1:length(protein_cols)) {
+    reg <- lm(trainc[[i]][,protein_cols[j]]~Surface, data = trainc[[i]]) # Predict b-actin expression from surface curvature
+    pred <- predict(reg, testc[[i]]) # Use model to predict in a test set
+    data <- data.frame(pred, testc[[i]][,protein_cols[j]]) # Put predicted and actual values together
+    mse_csb[i,j] <- mean((data[,2] - data[,1])^2) # Calculate MSE
+    new_list2[[j]] <- ggplot(data = data, aes(x = testc..i.....protein_cols.j.., y = pred)) + 
+      geom_point() + 
+      geom_smooth(method = lm, se = F) +
+      stat_poly_eq(use_label("R2"), size = 3) +
+      labs(x = "Actual", y = "Predicted") +
+      theme(text = element_text(color = "black"),
+            axis.title = element_text(size = 8, face = "bold"),
+            axis.text = element_text(size = 6),
+            panel.background = element_rect(fill = "white"),
+            axis.line = element_line(color = "black"))
+  }
+  csb_graphs[[i]] <- new_list2
+}
+```
+
+### Linear regression using only 7 day data
+
+```{r}
+wide.csb7 <- wide.csb[wide.csb$Time.Point == "7 Days", -3]
+wide.wcl7 <- wide.wcl[wide.wcl$Time.Point == "7 Days", -3]
+```
+
+### Regular ol' scatterplots
+
+```{r}
+ggplot(wide.csb7, aes(Surface, `β-Actin`)) + geom_point() + stat_smooth(method = "lm") + stat_poly_eq()
+ggplot(wide.csb7, aes(Surface, Ezrin)) + geom_point() + stat_smooth(method = "lm") + stat_poly_eq()
+ggplot(wide.wcl7, aes(Surface, `β-Actin`)) + geom_point() + stat_smooth(method = "lm") + stat_poly_eq()
+ggplot(wide.wcl7, aes(Surface, Ezrin)) + geom_point() + stat_smooth(method = "lm") + stat_poly_eq()
+```
+
+
+```{r}
+set.seed(444)
+# Create 10 training and test sets from CSB data and store in lists
+trainc <- list()
+testc <- list()
+for (i in 1:10) {
+  index <- sample(1:nrow(wide.csb7), 0.8*nrow(wide.csb7))
+  train.dfc <- wide.csb7[index, ]
+  trainc[[i]] <- train.dfc
+  test.dfc <- wide.csb7[-index, ]
+  testc[[i]] <- test.dfc
+}
+
+# Training sets have 14 observations and test sets have 4
+
+# Create 10 training and test sets from WCL data and store in lists
+trainw <- list()
+testw <- list()
+for (i in 1:10) {
+  index <- sample(1:nrow(wide.wcl7), 0.8*nrow(wide.wcl7))
+  train.dfw <- wide.wcl7[index, ]
+  trainw[[i]] <- train.dfw
+  test.dfw <- wide.wcl7[-index, ]
+  testw[[i]] <- test.dfw
+}
+
+# Training sets have 12 observations and test sets have 3
+```
+
+```{r}
+protein_cols <-  colnames(wide.wcl7[-c(1:2)])
+mse_wcl <- matrix(nrow = 10, ncol = 6)
+mse_csb <- matrix(nrow = 10, ncol = 6)
+
+# Save regression equations to a list
+equations_wcl <- list()
+equations_csb <- list()
+baby_listw <- list()
+baby_listc <- list()
+
+# Save predicted values in list of dataframes
+df_wcl <- list()
+df_wcl_small <- list()
+df_csb <- list()
+df_csb_small <- list()
+
+for (i in 1:length(trainw)) {
+  for (j in 1:length(protein_cols)) {
+    reg <- lm(trainw[[i]][,protein_cols[j]]~Surface, data = trainw[[i]]) # Predict b-actin expression from surface curvature
+    baby_listw[[j]] <- reg
+    pred <- predict(reg, testw[[i]]) # Use model to predict in a test set
+    data <- data.frame(pred, testw[[i]][,protein_cols[j]]) # Put predicted and actual values together
+    df_wcl_small[[j]] <- data.frame(cbind(rep(i, nrow(data)), data))
+    mse_wcl[i,j] <- mean((data[,2] - data[,1])^2, na.rm = T) # Calculate MSE
+  }
+  equations_wcl[[i]] <- baby_listw
+  df_wcl[[i]] <- df_wcl_small
+}
+
+for (i in 1:length(trainc)) {
+  for (j in 1:length(protein_cols)) {
+    reg <- lm(trainc[[i]][,protein_cols[j]]~Surface, data = trainc[[i]]) # Predict b-actin expression from surface curvature
+    baby_listc[[j]] <- reg
+    pred <- predict(reg, testc[[i]]) # Use model to predict in a test set
+    data <- data.frame(pred, testc[[i]][,protein_cols[j]]) # Put predicted and actual values together
+    df_csb_small[[j]] <- data.frame(cbind(rep(i, nrow(data)), data))
+    mse_csb[i,j] <- mean((data[,2] - data[,1])^2, na.rm = T) # Calculate MSE
+  }
+  equations_csb[[i]] <- baby_listc
+  df_csb[[i]] <- df_csb_small
+}
+```
+
+```{r}
+x <- equations_wcl[[1]]
+summary(x[[1]])
+summary(x[[2]])
+summary(x[[3]])
+summary(x[[4]])
+summary(x[[5]])
+summary(x[[6]])
+```
+
+```{r}
+x <- equations_csb[[1]]
+summary(x[[1]])
+summary(x[[2]])
+summary(x[[3]])
+summary(x[[4]])
+summary(x[[5]])
+summary(x[[6]])
+```
+
+
+```{r}
+# Combine data from each test set together - b.actin
+b.act.w <- data.frame()
+for (i in 1:length(df_wcl)) {
+  temp <- df_wcl[[i]][[1]]
+  b.act.w <- rbind(b.act.w, temp)
+}
+# Make rep column a factor
+b.act.w$rep.i..nrow.data.. <- factor(b.act.w$rep.i..nrow.data..)
+
+# Combine data from each test set together - ezrin
+ez.w <- data.frame()
+for (i in 1:length(df_wcl)) {
+  temp <- df_wcl[[i]][[2]]
+  ez.w <- rbind(ez.w, temp)
+}
+# Make rep column a factor
+ez.w$rep.i..nrow.data.. <- factor(ez.w$rep.i..nrow.data..)
+
+# Combine data from each test set together - a.tubulin
+a.tub.w <- data.frame()
+for (i in 1:length(df_wcl)) {
+  temp <- df_wcl[[i]][[3]]
+  a.tub.w <- rbind(a.tub.w, temp)
+}
+# Make rep column a factor
+a.tub.w$rep.i..nrow.data.. <- factor(a.tub.w$rep.i..nrow.data..)
+
+# Combine data from each test set together - a.actinin
+a.act.w <- data.frame()
+for (i in 1:length(df_wcl)) {
+  temp <- df_wcl[[i]][[4]]
+  a.act.w <- rbind(a.act.w, temp)
+}
+# Make rep column a factor
+a.act.w$rep.i..nrow.data.. <- factor(a.act.w$rep.i..nrow.data..)
+
+# Combine data from each test set together - cadherin
+cad.w <- data.frame()
+for (i in 1:length(df_wcl)) {
+  temp <- df_wcl[[i]][[5]]
+  cad.w <- rbind(cad.w, temp)
+}
+# Make rep column a factor
+cad.w$rep.i..nrow.data.. <- factor(cad.w$rep.i..nrow.data..)
+
+# Combine data from each test set together - vinculin
+vin.w <- data.frame()
+for (i in 1:length(df_wcl)) {
+  temp <- df_wcl[[i]][[6]]
+  vin.w <- rbind(vin.w, temp)
+}
+# Make rep column a factor
+vin.w$rep.i..nrow.data.. <- factor(vin.w$rep.i..nrow.data..)
+```
+
+```{r}
+fig.theme2 <- theme(text = element_text(color = "black"),
+       axis.title = element_text(size = 8, face = "bold"),
+       axis.text = element_text(size = 6),
+       plot.title = element_text(size = 10),
+       legend.position = "none",
+       panel.background = element_rect(fill = "white"),
+       axis.line = element_line(color = "black"))
+```
+
+
+```{r}
+baw <- ggplot(b.act.w, aes(x = testw..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+  labs(x = "Actual", y = "Predicted", color = "Test Set", title = "\U03B2-Actin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+  
+aaw <- ggplot(a.act.w, aes(x = testw..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "\U03B1-Actinin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+atw <- ggplot(a.tub.w, aes(x = testw..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "\U03B1-Tubulin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+cw <- ggplot(cad.w, aes(x = testw..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "Pan-Cadherin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+ew <- ggplot(ez.w, aes(x = testw..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+  labs(x = "Actual", y = "Predicted", color = "Test Set", title = "Ezrin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+vw <- ggplot(vin.w, aes(x = testw..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "Vinculin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+```
+
+```{r}
+plots <- grid.arrange(baw, aaw, atw, cw, ew, vw, ncol = 2, nrow = 3)
+```
+
+
+```{r}
+ggsave("./Figures/Whole_Cell_Lysate_PredictedvsActual.svg", plot = plots, width = 6, height = 8, units = "in")
+```
+
+```{r}
+# Combine data from each test set together - b.actin
+b.act.c <- data.frame()
+for (i in 1:length(df_csb)) {
+  temp <- df_csb[[i]][[1]]
+  b.act.c <- rbind(b.act.c, temp)
+}
+# Make rep column a factor
+b.act.c$rep.i..nrow.data.. <- factor(b.act.c$rep.i..nrow.data..)
+
+# Combine data from each test set together - ezrin
+ez.c <- data.frame()
+for (i in 1:length(df_csb)) {
+  temp <- df_csb[[i]][[2]]
+  ez.c <- rbind(ez.c, temp)
+}
+# Make rep column a factor
+ez.c$rep.i..nrow.data.. <- factor(ez.c$rep.i..nrow.data..)
+
+# Combine data from each test set together - a.tubulin
+a.tub.c <- data.frame()
+for (i in 1:length(df_csb)) {
+  temp <- df_csb[[i]][[3]]
+  a.tub.c <- rbind(a.tub.c, temp)
+}
+# Make rep column a factor
+a.tub.c$rep.i..nrow.data.. <- factor(a.tub.c$rep.i..nrow.data..)
+
+# Combine data from each test set together - a.actinin
+a.act.c <- data.frame()
+for (i in 1:length(df_csb)) {
+  temp <- df_csb[[i]][[4]]
+  a.act.c <- rbind(a.act.c, temp)
+}
+# Make rep column a factor
+a.act.c$rep.i..nrow.data.. <- factor(a.act.c$rep.i..nrow.data..)
+
+# Combine data from each test set together - cadherin
+cad.c <- data.frame()
+for (i in 1:length(df_csb)) {
+  temp <- df_csb[[i]][[5]]
+  cad.c <- rbind(cad.c, temp)
+}
+# Make rep column a factor
+cad.c$rep.i..nrow.data.. <- factor(cad.c$rep.i..nrow.data..)
+
+# Combine data from each test set together - vinculin
+vin.c <- data.frame()
+for (i in 1:length(df_csb)) {
+  temp <- df_csb[[i]][[6]]
+  vin.c <- rbind(vin.c, temp)
+}
+# Make rep column a factor
+vin.c$rep.i..nrow.data.. <- factor(vin.c$rep.i..nrow.data..)
+```
+
+```{r}
+bac <- ggplot(b.act.c, aes(x = testc..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+  labs(x = "Actual", y = "Predicted", color = "Test Set", title = "\U03B2-Actin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+  
+aac <- ggplot(a.act.c, aes(x = testc..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "\U03B1-Actinin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+atc <- ggplot(a.tub.c, aes(x = testc..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "\U03B1-Tubulin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+cc <- ggplot(cad.c, aes(x = testc..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "Pan-Cadherin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+ec <- ggplot(ez.c, aes(x = testc..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+  labs(x = "Actual", y = "Predicted", color = "Test Set", title = "Ezrin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+
+vc <- ggplot(vin.c, aes(x = testc..i.....protein_cols.j.., y = pred, color = rep.i..nrow.data..)) + geom_point() +
+  geom_abline(color = "#C42F1A") +
+ labs(x = "Actual", y = "Predicted", color = "Test Set", title = "Vinculin") +
+  scale_color_viridis_d(option = "H") +
+  fig.theme2
+```
+
+```{r}
+plots2 <- grid.arrange(bac, aac, atc, cc, ec, vc, ncol = 2, nrow = 3)
+```
+
+```{r}
+ggsave("./Figures/Mechanical_Fraction_PredictedvsActual.svg", plot = plots2, width = 6, height = 8, units = "in")
+```
+
+```{r}
+protein_cols <- c("\U03B2-Actin", "Ezrin", "\U03B1-Tubulin", "\U03B1-Actinin", "Pan-Cadherin", "Vinculin")
+mse_wcl <- as.data.frame(mse_wcl)
+colnames(mse_wcl) <- protein_cols
+mse_csb <- as.data.frame(mse_csb)
+colnames(mse_csb) <- protein_cols
+```
+
+```{r}
+mse_wcl <- rbind(mse_wcl, colMeans(mse_wcl), sapply(mse_wcl, sd))
+mse_csb <- rbind(mse_csb, colMeans(mse_csb), sapply(mse_csb, sd))
+```
+
+```{r}
+rownames(mse_wcl)[11] <- "Average CV MSE"
+rownames(mse_wcl)[12] <- "SD CV MSE"
+rownames(mse_csb)[11] <- "Average CV MSE"
+rownames(mse_csb)[12] <- "SD CV MSE"
+```
+
+```{r}
+error <- read.csv("MSE WB LinReg.csv")
+error <- error[1:6, 1:5]
+```
+
+```{r}
+error$Protein <- c("\U03B2-Actin", "Ezrin", "\U03B1-Tubulin", "\U03B1-Actinin", "Pan-Cadherin", "Vinculin")
+error$Protein <- factor(error$Protein, levels = c("\U03B1-Actinin", "\U03B1-Tubulin", "\U03B2-Actin", "Ezrin", "Pan-Cadherin", "Vinculin"))
+```
+
+```{r}
+wcl_bars <- ggplot(error, aes(x = Protein, y = Average.WCL.MSE)) +
+  geom_col(aes(fill = Protein)) +
+  geom_errorbar(aes(x = Protein, ymin = Average.WCL.MSE - SD.WCL.MSE, ymax = Average.WCL.MSE + SD.WCL.MSE), 
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(y = "Average MSE") +
+  scale_fill_manual(values = fig.colors) +
+  theme(text = element_text(color = "black"),
+                   axis.title.x = element_blank(),
+                   axis.title.y = element_text(size = 10, face = "bold"),
+                   axis.text = element_text(size = 10),
+                   axis.text.x = element_text(angle = 45, hjust = 1),
+                   legend.position = "none",
+                   title = element_text(size = 10, face = "bold"),
+                   panel.background = element_rect(fill = "white"),
+                   axis.line = element_line(color = "black")) +
+  labs(title = "Whole Cell Lysate")
+csb_bars <- ggplot(error, aes(x = Protein, y = Average.CSB.MSE)) +
+  geom_col(aes(fill = Protein)) +
+  geom_errorbar(aes(x = Protein, ymin = Average.CSB.MSE - SD.CSB.MSE, ymax = Average.CSB.MSE + SD.CSB.MSE), 
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(y = "Average MSE") +
+  scale_fill_manual(values = fig.colors) +
+  theme(text = element_text(color = "black"),
+                   axis.title.x = element_blank(),
+                   axis.title.y = element_text(size = 10, face = "bold"),
+                   axis.text = element_text(size = 10),
+                   axis.text.x = element_text(angle = 45, hjust = 1),
+                   legend.position = "none",
+                   title = element_text(size = 10, face = "bold"),
+                   panel.background = element_rect(fill = "white"),
+                   axis.line = element_line(color = "black")) +
+  labs(title = "Mechanical Fraction")
+```
+
+```{r}
+mse.graphs2 <- grid.arrange(wcl_bars, csb_bars, ncol = 2)
+```
+
+```{r}
+ggsave("./Figures/MSE_FibertoWB_Bargraph.svg", plot = mse.graphs2, height = 3, width = 6, units = "in")
+```
+
+```{r}
+long_mse_wcl <- pivot_longer(mse_wcl, c(1:6), names_to = "Target", values_to = "Mean Squared Error")
+long_mse_csb <- pivot_longer(mse_csb, c(1:6), names_to = "Target", values_to = "Mean Squared Error")
+long_mse_wcl$Target <- factor(long_mse_wcl$Target, levels = c("\U03B1-Actinin", "\U03B1-Tubulin", "\U03B2-Actin", "Ezrin", "Pan-Cadherin", "Vinculin"))
+long_mse_csb$Target <- factor(long_mse_csb$Target, levels = c("\U03B1-Actinin", "\U03B1-Tubulin", "\U03B2-Actin", "Ezrin", "Pan-Cadherin", "Vinculin"))
+```
+
+```{r}
+g1 <- ggplot(long_mse_wcl, aes(Target, `Mean Squared Error`, fill = Target)) + 
+  geom_boxplot() +
+  scale_fill_manual(values = fig.colors) +
+  theme(text = element_text(color = "black"),
+                   axis.title.x = element_blank(),
+                   axis.title.y = element_text(size = 10, face = "bold"),
+                   axis.text = element_text(size = 10),
+                   axis.text.x = element_text(angle = 45, hjust = 1),
+                   legend.position = "none",
+                   title = element_text(size = 10, face = "bold"),
+                   panel.background = element_rect(fill = "white"),
+                   axis.line = element_line(color = "black")) +
+  labs(title = "Whole Cell Lysate")
+g2 <- ggplot(long_mse_csb, aes(Target, `Mean Squared Error`, fill = Target)) + 
+  geom_boxplot() +
+  scale_fill_manual(values = fig.colors) +
+  theme(text = element_text(color = "black"),
+                   axis.title.x = element_blank(),
+                   axis.title.y = element_text(size = 10, face = "bold"),
+                   axis.text = element_text(size = 10),
+                   axis.text.x = element_text(angle = 45, hjust = 1),
+                   legend.position = "none",
+                   title = element_text(size = 10, face = "bold"),
+                   panel.background = element_rect(fill = "white"),
+                   axis.line = element_line(color = "black")) +
+  labs(title = "Mechanical Fraction")
+mse.graphs <- grid.arrange(g1, g2, ncol = 2)
+```
+
+```{r}
+ggsave("./Figures/MSE_FibertoWB.svg", plot = mse.graphs, height = 3, width = 6, units = "in")
+```
+
