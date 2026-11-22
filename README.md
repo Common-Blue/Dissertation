@@ -1,22 +1,18 @@
----
-output: html_document
----
-
 # Building Predictive Models of Stem Cell Fate from Curvature-Induced Cytoskeletal Changes
 
-Technology Used and Why
+### Technology Used and Why
 
-Process Used to Develop Dissertation and Why
+### Process Used to Develop Dissertation and Why
 
-Table of Contents
+### Table of Contents
 
-How was this dissertation developed?
+### How was this dissertation developed?
 
-Why is it important?
+### Why is it important?
 
-Intended Use of this Dissertation
+### Intended Use of this Dissertation
 
-####Information Sources
+### Information Sources
 
 All data used in this dissertation was generated in the Musculoskeletal Regenerative 
 Engineering Lab by me from analysis of the following assays:
